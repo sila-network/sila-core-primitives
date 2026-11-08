@@ -1,0 +1,495 @@
+# mode: asm
+go version go1.25.4 linux/amd64
+# cpu: Intel(R) Xeon(R) 6973P-C
+# os/arch: linux/amd64
+    noavx_test.go:30: SILA AVX-512 path enabled: true
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) 6973P-C
+BenchmarkOneShot/impl=sila/size=32         	  824840	       215.8 ns/op	 148.28 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=32         	  533286	       286.2 ns/op	 111.81 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=64         	  819350	       216.7 ns/op	 295.33 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=64         	  635349	       288.2 ns/op	 222.07 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=128        	  825261	       216.7 ns/op	 590.54 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=128        	  626398	       289.0 ns/op	 442.93 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=136        	  441824	       408.7 ns/op	 332.75 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=136        	  339042	       529.4 ns/op	 256.89 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=256        	  437793	       411.8 ns/op	 621.64 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=256        	  335347	       538.8 ns/op	 475.14 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=512        	  221415	       808.6 ns/op	 633.18 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=512        	  174465	      1025 ns/op	 499.30 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1024       	  112689	      1596 ns/op	 641.57 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1024       	   88506	      2025 ns/op	 505.58 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=4096       	   29295	      6152 ns/op	 665.85 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=4096       	   22404	      8354 ns/op	 490.33 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=16384      	    6010	     27653 ns/op	 592.49 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=16384      	    5072	     35106 ns/op	 466.69 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=65536      	    1694	     95491 ns/op	 686.30 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=65536      	    1497	    120539 ns/op	 543.69 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1048576    	     100	   1524750 ns/op	 687.70 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1048576    	      84	   2010117 ns/op	 521.65 MB/s	      33 B/op	       1 allocs/op
+BenchmarkStreaming/impl=sila/size=32       	  808150	       230.9 ns/op	 138.57 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=32       	  583663	       303.2 ns/op	 105.56 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=64       	  798991	       222.1 ns/op	 288.19 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=64       	  683306	       260.7 ns/op	 245.53 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=128      	  802780	       228.6 ns/op	 560.00 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=128      	  688350	       262.2 ns/op	 488.09 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=136      	  429793	       416.9 ns/op	 326.24 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=136      	  352760	       558.1 ns/op	 243.71 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=256      	  367123	       485.6 ns/op	 527.14 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=256      	  311805	       581.8 ns/op	 440.04 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=512      	  188269	       944.3 ns/op	 542.18 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=512      	  156984	      1142 ns/op	 448.29 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1024     	   97039	      1855 ns/op	 552.10 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1024     	   80318	      2263 ns/op	 452.60 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=4096     	   25172	      7128 ns/op	 574.61 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=4096     	   19948	      9115 ns/op	 449.35 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=16384    	    6422	     27933 ns/op	 586.54 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=16384    	    5106	     34868 ns/op	 469.88 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=65536    	    1654	    110634 ns/op	 592.37 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=65536    	    1503	    119955 ns/op	 546.34 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1048576  	     100	   1557941 ns/op	 673.05 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1048576  	      80	   2107723 ns/op	 497.49 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) 6973P-C
+BenchmarkOneShot/impl=sila/size=32         	  662227	       251.9 ns/op	 127.05 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=32         	  533838	       330.8 ns/op	  96.73 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=64         	  708812	       252.2 ns/op	 253.77 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=64         	  545689	       333.4 ns/op	 191.97 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=128        	  709647	       252.2 ns/op	 507.61 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=128        	  539991	       334.9 ns/op	 382.21 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=136        	  374854	       470.8 ns/op	 288.90 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=136        	  293095	       614.3 ns/op	 221.40 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=256        	  374746	       436.3 ns/op	 586.75 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=256        	  339426	       533.6 ns/op	 479.73 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=512        	  216966	       809.9 ns/op	 632.18 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=512        	  158503	      1177 ns/op	 435.08 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1024       	   96472	      1802 ns/op	 568.23 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1024       	   88234	      2027 ns/op	 505.17 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=4096       	   29150	      6148 ns/op	 666.20 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=4096       	   23040	      7793 ns/op	 525.57 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=16384      	    7486	     23958 ns/op	 683.86 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=16384      	    5929	     30213 ns/op	 542.29 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=65536      	    1888	     95263 ns/op	 687.94 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=65536      	    1490	    120908 ns/op	 542.03 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1048576    	     100	   1560377 ns/op	 672.00 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1048576    	      91	   1922967 ns/op	 545.29 MB/s	      33 B/op	       1 allocs/op
+BenchmarkStreaming/impl=sila/size=32       	  805977	       222.3 ns/op	 143.95 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=32       	  675595	       260.7 ns/op	 122.76 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=64       	  799532	       222.6 ns/op	 287.51 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=64       	  690738	       261.9 ns/op	 244.35 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=128      	  805839	       222.8 ns/op	 574.46 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=128      	  680199	       261.7 ns/op	 489.05 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=136      	  431511	       417.1 ns/op	 326.07 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=136      	  353754	       508.4 ns/op	 267.52 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=256      	  429460	       419.5 ns/op	 610.24 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=256      	  357832	       554.4 ns/op	 461.74 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=512      	  188780	       948.9 ns/op	 539.55 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=512      	  154460	      1071 ns/op	 478.04 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1024     	  111882	      1606 ns/op	 637.47 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1024     	   88006	      1987 ns/op	 515.24 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=4096     	   29175	      6153 ns/op	 665.64 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=4096     	   23244	      7733 ns/op	 529.67 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=16384    	    7496	     23963 ns/op	 683.73 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=16384    	    5970	     30124 ns/op	 543.89 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=65536    	    1886	     95505 ns/op	 686.20 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=65536    	    1507	    119743 ns/op	 547.30 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1048576  	     100	   1524056 ns/op	 688.02 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1048576  	      90	   1918112 ns/op	 546.67 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) 6973P-C
+BenchmarkOneShot/impl=sila/size=32         	  740720	       216.0 ns/op	 148.16 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=32         	  622756	       285.7 ns/op	 112.02 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=64         	  828296	       215.9 ns/op	 296.45 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=64         	  635245	       286.2 ns/op	 223.60 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=128        	  831582	       216.1 ns/op	 592.32 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=128        	  626283	       298.4 ns/op	 428.92 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=136        	  405042	       480.1 ns/op	 283.30 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=136        	  278026	       559.8 ns/op	 242.95 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=256        	  435753	       411.7 ns/op	 621.74 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=256        	  340228	       531.8 ns/op	 481.39 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=512        	  222319	       810.5 ns/op	 631.73 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=512        	  172443	      1024 ns/op	 499.87 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1024       	  112856	      1599 ns/op	 640.43 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1024       	   88951	      2020 ns/op	 506.83 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=4096       	   29307	      6142 ns/op	 666.89 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=4096       	   23178	      7773 ns/op	 526.95 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=16384      	    7496	     23932 ns/op	 684.60 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=16384      	    5901	     30867 ns/op	 530.79 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=65536      	    1888	     95561 ns/op	 685.81 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=65536      	    1474	    120360 ns/op	 544.50 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1048576    	     100	   1524611 ns/op	 687.77 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1048576    	      91	   1916921 ns/op	 547.01 MB/s	      33 B/op	       1 allocs/op
+BenchmarkStreaming/impl=sila/size=32       	  809506	       221.9 ns/op	 144.20 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=32       	  688219	       260.1 ns/op	 123.04 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=64       	  806624	       222.8 ns/op	 287.30 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=64       	  670136	       267.7 ns/op	 239.05 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=128      	  802608	       230.2 ns/op	 555.98 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=128      	  584065	       310.3 ns/op	 412.45 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=136      	  386414	       484.1 ns/op	 280.92 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=136      	  305420	       569.6 ns/op	 238.75 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=256      	  427927	       418.6 ns/op	 611.55 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=256      	  354232	       507.8 ns/op	 504.11 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=512      	  220393	       815.3 ns/op	 628.02 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=512      	  183961	       982.6 ns/op	 521.09 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1024     	  112201	      1604 ns/op	 638.26 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1024     	   90588	      1963 ns/op	 521.56 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=4096     	   29282	      6156 ns/op	 665.37 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=4096     	   23227	      7741 ns/op	 529.16 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=16384    	    7491	     23959 ns/op	 683.83 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=16384    	    5924	     30362 ns/op	 539.63 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=65536    	    1886	     95569 ns/op	 685.75 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=65536    	    1490	    119752 ns/op	 547.27 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1048576  	     100	   1591025 ns/op	 659.06 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1048576  	      91	   1918551 ns/op	 546.55 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) 6973P-C
+BenchmarkOneShot/impl=sila/size=32         	  792596	       217.1 ns/op	 147.41 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=32         	  571018	       287.8 ns/op	 111.18 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=64         	  786409	       217.6 ns/op	 294.17 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=64         	  584739	       286.0 ns/op	 223.80 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=128        	  832266	       217.0 ns/op	 589.92 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=128        	  626682	       287.7 ns/op	 444.86 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=136        	  440661	       406.7 ns/op	 334.38 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=136        	  340749	       527.6 ns/op	 257.79 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=256        	  435348	       411.6 ns/op	 622.00 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=256        	  339175	       533.1 ns/op	 480.21 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=512        	  222337	       810.3 ns/op	 631.84 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=512        	  174778	      1027 ns/op	 498.54 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1024       	  112128	      1656 ns/op	 618.32 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1024       	   86931	      2160 ns/op	 474.02 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=4096       	   24976	      7171 ns/op	 571.20 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=4096       	   19837	      8953 ns/op	 457.51 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=16384      	    6483	     27765 ns/op	 590.10 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=16384      	    5085	     34817 ns/op	 470.58 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=65536      	    1680	    100572 ns/op	 651.63 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=65536      	    1500	    123797 ns/op	 529.38 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1048576    	     100	   1523327 ns/op	 688.35 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1048576    	      92	   2196376 ns/op	 477.41 MB/s	      33 B/op	       1 allocs/op
+BenchmarkStreaming/impl=sila/size=32       	  693252	       258.3 ns/op	 123.87 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=32       	  587377	       265.7 ns/op	 120.45 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=64       	  805314	       245.2 ns/op	 260.96 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=64       	  591560	       304.1 ns/op	 210.48 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=128      	  702272	       259.3 ns/op	 493.60 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=128      	  585702	       306.1 ns/op	 418.22 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=136      	  379317	       486.7 ns/op	 279.41 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=136      	  306616	       590.0 ns/op	 230.53 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=256      	  367850	       447.2 ns/op	 572.50 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=256      	  356670	       509.1 ns/op	 502.81 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=512      	  220458	       818.1 ns/op	 625.80 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=512      	  184130	       980.0 ns/op	 522.47 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1024     	  112231	      1604 ns/op	 638.56 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1024     	   88982	      1975 ns/op	 518.47 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=4096     	   29254	      6164 ns/op	 664.54 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=4096     	   23275	      7747 ns/op	 528.72 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=16384    	    7508	     23954 ns/op	 683.98 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=16384    	    5952	     30100 ns/op	 544.32 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=65536    	    1885	     95310 ns/op	 687.61 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=65536    	    1489	    119988 ns/op	 546.19 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1048576  	     100	   1524105 ns/op	 687.99 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1048576  	      82	   1921232 ns/op	 545.78 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) 6973P-C
+BenchmarkOneShot/impl=sila/size=32         	  738957	       216.6 ns/op	 147.77 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=32         	  618782	       285.5 ns/op	 112.09 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=64         	  825889	       216.1 ns/op	 296.22 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=64         	  634573	       286.3 ns/op	 223.56 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=128        	  826042	       221.8 ns/op	 577.15 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=128        	  627127	       288.9 ns/op	 443.08 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=136        	  442428	       408.7 ns/op	 332.76 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=136        	  317548	       560.7 ns/op	 242.55 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=256        	  371919	       485.0 ns/op	 527.88 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=256        	  291769	       551.5 ns/op	 464.21 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=512        	  222504	       808.9 ns/op	 632.96 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=512        	  174085	      1025 ns/op	 499.60 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1024       	  112420	      1597 ns/op	 641.25 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1024       	   89482	      2025 ns/op	 505.78 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=4096       	   29130	      6153 ns/op	 665.66 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=4096       	   23110	      8512 ns/op	 481.20 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=16384      	    6416	     25054 ns/op	 653.95 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=16384      	    5920	     30534 ns/op	 536.58 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=65536      	    1887	     95485 ns/op	 686.35 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=65536      	    1497	    121029 ns/op	 541.49 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1048576    	     100	   1523956 ns/op	 688.06 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1048576    	      87	   1943635 ns/op	 539.49 MB/s	      33 B/op	       1 allocs/op
+BenchmarkStreaming/impl=sila/size=32       	  807358	       221.8 ns/op	 144.25 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=32       	  687640	       260.2 ns/op	 122.98 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=64       	  809152	       222.1 ns/op	 288.11 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=64       	  693952	       260.7 ns/op	 245.54 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=128      	  804064	       223.2 ns/op	 573.53 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=128      	  683010	       263.0 ns/op	 486.63 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=136      	  426355	       417.6 ns/op	 325.64 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=136      	  354415	       507.2 ns/op	 268.13 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=256      	  428503	       418.7 ns/op	 611.36 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=256      	  352172	       508.0 ns/op	 503.91 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=512      	  220279	       815.3 ns/op	 627.98 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=512      	  182137	       981.5 ns/op	 521.67 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1024     	  111944	      1609 ns/op	 636.29 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1024     	   90513	      1974 ns/op	 518.76 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=4096     	   29232	      6200 ns/op	 660.67 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=4096     	   23270	      7766 ns/op	 527.40 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=16384    	    7479	     24233 ns/op	 676.12 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=16384    	    5798	     30196 ns/op	 542.58 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=65536    	    1886	     95286 ns/op	 687.78 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=65536    	    1500	    120779 ns/op	 542.61 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1048576  	     100	   1637611 ns/op	 640.31 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1048576  	      90	   2011974 ns/op	 521.17 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) 6973P-C
+BenchmarkOneShot/impl=sila/size=32         	  741427	       218.0 ns/op	 146.80 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=32         	  609550	       288.6 ns/op	 110.87 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=64         	  822288	       217.2 ns/op	 294.72 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=64         	  635188	       289.2 ns/op	 221.29 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=128        	  827196	       221.4 ns/op	 578.22 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=128        	  561148	       293.9 ns/op	 435.49 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=136        	  442148	       459.6 ns/op	 295.91 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=136        	  291723	       616.2 ns/op	 220.72 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=256        	  373647	       480.5 ns/op	 532.78 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=256        	  295928	       532.5 ns/op	 480.75 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=512        	  222105	       810.2 ns/op	 631.91 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=512        	  175840	      1025 ns/op	 499.65 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1024       	  112464	      1599 ns/op	 640.57 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1024       	   88974	      2026 ns/op	 505.50 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=4096       	   29241	      6150 ns/op	 666.04 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=4096       	   23130	      7785 ns/op	 526.12 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=16384      	    7518	     24210 ns/op	 676.75 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=16384      	    5415	     31020 ns/op	 528.17 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=65536      	    1887	     95247 ns/op	 688.06 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=65536      	    1494	    120196 ns/op	 545.24 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1048576    	     100	   1525624 ns/op	 687.31 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1048576    	      88	   2033102 ns/op	 515.75 MB/s	      33 B/op	       1 allocs/op
+BenchmarkStreaming/impl=sila/size=32       	  695554	       247.5 ns/op	 129.29 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=32       	  684822	       259.6 ns/op	 123.28 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=64       	  810103	       222.0 ns/op	 288.22 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=64       	  689650	       260.1 ns/op	 246.05 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=128      	  800406	       222.6 ns/op	 575.09 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=128      	  679711	       262.7 ns/op	 487.16 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=136      	  430309	       418.0 ns/op	 325.33 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=136      	  357405	       507.7 ns/op	 267.88 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=256      	  429700	       418.6 ns/op	 611.59 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=256      	  354693	       508.8 ns/op	 503.10 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=512      	  220530	       815.7 ns/op	 627.64 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=512      	  184033	       979.5 ns/op	 522.70 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1024     	  111960	      1605 ns/op	 637.99 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1024     	   89925	      1978 ns/op	 517.58 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=4096     	   29247	      6150 ns/op	 666.03 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=4096     	   23173	      7759 ns/op	 527.91 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=16384    	    7417	     24616 ns/op	 665.59 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=16384    	    5776	     30203 ns/op	 542.46 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=65536    	    1882	     95991 ns/op	 682.73 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=65536    	    1496	    120128 ns/op	 545.55 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1048576  	     100	   1536386 ns/op	 682.50 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1048576  	      88	   1917747 ns/op	 546.78 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) 6973P-C
+BenchmarkOneShot/impl=sila/size=32         	  748969	       217.6 ns/op	 147.08 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=32         	  616116	       286.5 ns/op	 111.69 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=64         	  825382	       216.7 ns/op	 295.31 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=64         	  631899	       297.2 ns/op	 215.33 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=128        	  792955	       248.4 ns/op	 515.29 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=128        	  548158	       335.4 ns/op	 381.63 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=136        	  378303	       464.4 ns/op	 292.88 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=136        	  288832	       540.1 ns/op	 251.81 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=256        	  435018	       412.9 ns/op	 619.98 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=256        	  327784	       533.7 ns/op	 479.64 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=512        	  221055	       809.3 ns/op	 632.65 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=512        	  175675	      1024 ns/op	 499.77 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1024       	  112782	      1596 ns/op	 641.63 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1024       	   89169	      2020 ns/op	 506.86 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=4096       	   29076	      6154 ns/op	 665.63 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=4096       	   23102	      7797 ns/op	 525.33 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=16384      	    7459	     24020 ns/op	 682.11 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=16384      	    5938	     30214 ns/op	 542.26 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=65536      	    1891	     95395 ns/op	 687.00 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=65536      	    1494	    120202 ns/op	 545.22 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1048576    	     100	   1526466 ns/op	 686.93 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1048576    	      91	   1921200 ns/op	 545.79 MB/s	      33 B/op	       1 allocs/op
+BenchmarkStreaming/impl=sila/size=32       	  806566	       221.8 ns/op	 144.26 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=32       	  690746	       259.7 ns/op	 123.23 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=64       	  808165	       222.3 ns/op	 287.92 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=64       	  689319	       260.8 ns/op	 245.42 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=128      	  803578	       223.8 ns/op	 572.05 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=128      	  676081	       262.1 ns/op	 488.38 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=136      	  429247	       417.0 ns/op	 326.15 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=136      	  356026	       510.5 ns/op	 266.42 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=256      	  428646	       420.7 ns/op	 608.56 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=256      	  362014	       517.2 ns/op	 494.94 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=512      	  215684	       816.0 ns/op	 627.48 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=512      	  176032	       983.7 ns/op	 520.50 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1024     	  111783	      1605 ns/op	 637.94 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1024     	   90170	      1991 ns/op	 514.30 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=4096     	   29264	      6163 ns/op	 664.65 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=4096     	   23253	      7739 ns/op	 529.25 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=16384    	    7484	     23953 ns/op	 684.00 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=16384    	    5960	     29979 ns/op	 546.51 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=65536    	    1888	     95309 ns/op	 687.62 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=65536    	    1508	    119437 ns/op	 548.71 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1048576  	     100	   1526624 ns/op	 686.86 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1048576  	      86	   1917461 ns/op	 546.86 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) 6973P-C
+BenchmarkOneShot/impl=sila/size=32         	  790140	       216.0 ns/op	 148.14 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=32         	  624979	       285.6 ns/op	 112.05 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=64         	  825835	       216.0 ns/op	 296.34 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=64         	  635181	       286.6 ns/op	 223.31 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=128        	  829441	       216.1 ns/op	 592.37 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=128        	  629451	       287.6 ns/op	 445.10 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=136        	  442507	       406.4 ns/op	 334.68 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=136        	  321259	       528.6 ns/op	 257.30 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=256        	  435951	       411.6 ns/op	 621.92 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=256        	  339184	       534.2 ns/op	 479.26 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=512        	  211676	       809.7 ns/op	 632.35 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=512        	  174435	      1027 ns/op	 498.56 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1024       	  112363	      1598 ns/op	 640.78 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1024       	   88527	      2026 ns/op	 505.52 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=4096       	   29259	      6170 ns/op	 663.90 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=4096       	   23128	      7785 ns/op	 526.16 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=16384      	    7489	     23943 ns/op	 684.30 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=16384      	    5938	     30288 ns/op	 540.94 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=65536      	    1888	     95268 ns/op	 687.91 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=65536      	    1492	    120081 ns/op	 545.76 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1048576    	     100	   1523542 ns/op	 688.25 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1048576    	      91	   1914688 ns/op	 547.65 MB/s	      33 B/op	       1 allocs/op
+BenchmarkStreaming/impl=sila/size=32       	  803697	       221.9 ns/op	 144.20 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=32       	  693184	       260.0 ns/op	 123.08 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=64       	  804668	       222.2 ns/op	 288.00 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=64       	  690439	       260.7 ns/op	 245.54 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=128      	  810555	       222.3 ns/op	 575.81 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=128      	  681614	       261.9 ns/op	 488.68 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=136      	  430810	       417.0 ns/op	 326.16 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=136      	  356106	       508.1 ns/op	 267.68 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=256      	  429534	       418.8 ns/op	 611.22 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=256      	  354961	       507.3 ns/op	 504.60 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=512      	  220677	       815.4 ns/op	 627.94 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=512      	  180192	       985.7 ns/op	 519.45 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1024     	  111838	      1602 ns/op	 639.03 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1024     	   91478	      1967 ns/op	 520.70 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=4096     	   29224	      6155 ns/op	 665.45 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=4096     	   23282	      7705 ns/op	 531.59 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=16384    	    7485	     23971 ns/op	 683.48 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=16384    	    5941	     30014 ns/op	 545.89 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=65536    	    1885	     95260 ns/op	 687.97 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=65536    	    1498	    119500 ns/op	 548.42 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1048576  	     100	   1524170 ns/op	 687.97 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1048576  	      88	   1914970 ns/op	 547.57 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) 6973P-C
+BenchmarkOneShot/impl=sila/size=32         	  765284	       215.9 ns/op	 148.20 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=32         	  625294	       285.5 ns/op	 112.08 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=64         	  790560	       216.6 ns/op	 295.54 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=64         	  625516	       286.2 ns/op	 223.64 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=128        	  833402	       216.0 ns/op	 592.52 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=128        	  623286	       287.9 ns/op	 444.56 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=136        	  440925	       406.7 ns/op	 334.38 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=136        	  343663	       527.8 ns/op	 257.68 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=256        	  435996	       412.4 ns/op	 620.75 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=256        	  337892	       533.6 ns/op	 479.76 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=512        	  221749	       809.8 ns/op	 632.27 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=512        	  174681	      1023 ns/op	 500.25 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1024       	  112644	      1596 ns/op	 641.56 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1024       	   88588	      2021 ns/op	 506.68 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=4096       	   29228	      6151 ns/op	 665.92 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=4096       	   23290	      7733 ns/op	 529.70 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=16384      	    7507	     23950 ns/op	 684.08 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=16384      	    5916	     30078 ns/op	 544.72 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=65536      	    1880	     95249 ns/op	 688.05 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=65536      	    1498	    119906 ns/op	 546.56 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1048576    	     100	   1527671 ns/op	 686.39 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1048576    	      88	   1922142 ns/op	 545.52 MB/s	      33 B/op	       1 allocs/op
+BenchmarkStreaming/impl=sila/size=32       	  806725	       221.9 ns/op	 144.23 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=32       	  688623	       259.9 ns/op	 123.14 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=64       	  809239	       222.1 ns/op	 288.19 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=64       	  700369	       260.3 ns/op	 245.83 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=128      	  805884	       222.6 ns/op	 575.14 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=128      	  680672	       262.2 ns/op	 488.22 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=136      	  429931	       421.4 ns/op	 322.74 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=136      	  322195	       589.3 ns/op	 230.80 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=256      	  366866	       488.5 ns/op	 524.01 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=256      	  303493	       591.5 ns/op	 432.78 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=512      	  188937	       952.3 ns/op	 537.66 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=512      	  156138	      1154 ns/op	 443.53 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1024     	   95834	      1654 ns/op	 619.16 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1024     	   83278	      2082 ns/op	 491.83 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=4096     	   24763	      7182 ns/op	 570.30 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=4096     	   19857	      9086 ns/op	 450.81 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=16384    	    6414	     27960 ns/op	 585.98 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=16384    	    5164	     34414 ns/op	 476.09 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=65536    	    1887	     95275 ns/op	 687.86 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=65536    	    1500	    119715 ns/op	 547.43 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1048576  	     100	   1523024 ns/op	 688.48 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1048576  	      87	   1914648 ns/op	 547.66 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) 6973P-C
+BenchmarkOneShot/impl=sila/size=32         	  769658	       216.0 ns/op	 148.17 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=32         	  624939	       285.2 ns/op	 112.18 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=64         	  831636	       216.2 ns/op	 296.07 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=64         	  636320	       286.8 ns/op	 223.16 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=128        	  834950	       216.1 ns/op	 592.33 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=128        	  629313	       287.9 ns/op	 444.64 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=136        	  440605	       407.1 ns/op	 334.06 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=136        	  343246	       527.7 ns/op	 257.72 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=256        	  436585	       412.1 ns/op	 621.25 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=256        	  336717	       533.1 ns/op	 480.17 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=512        	  222716	       809.1 ns/op	 632.83 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=512        	  176593	      1025 ns/op	 499.65 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1024       	  110870	      1605 ns/op	 637.94 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1024       	   84428	      2240 ns/op	 457.16 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=4096       	   25059	      6969 ns/op	 587.75 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=4096       	   20210	      9127 ns/op	 448.79 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=16384      	    6430	     27598 ns/op	 593.68 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=16384      	    5946	     30909 ns/op	 530.07 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=65536      	    1887	     95452 ns/op	 686.59 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=65536      	    1497	    121361 ns/op	 540.01 MB/s	      32 B/op	       1 allocs/op
+BenchmarkOneShot/impl=sila/size=1048576    	     100	   1762715 ns/op	 594.86 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOneShot/impl=geth/size=1048576    	      91	   1916281 ns/op	 547.19 MB/s	      33 B/op	       1 allocs/op
+BenchmarkStreaming/impl=sila/size=32       	  807344	       222.1 ns/op	 144.10 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=32       	  688531	       260.2 ns/op	 122.99 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=64       	  806667	       222.9 ns/op	 287.09 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=64       	  687945	       267.7 ns/op	 239.10 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=128      	  799826	       226.0 ns/op	 566.35 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=128      	  679957	       263.9 ns/op	 485.00 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=136      	  421974	       418.5 ns/op	 324.99 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=136      	  354114	       507.9 ns/op	 267.77 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=256      	  427152	       418.7 ns/op	 611.47 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=256      	  355363	       506.7 ns/op	 505.24 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=512      	  220225	       815.2 ns/op	 628.05 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=512      	  185642	       981.8 ns/op	 521.49 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1024     	  109395	      1605 ns/op	 637.82 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1024     	   90690	      1986 ns/op	 515.68 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=4096     	   29250	      6149 ns/op	 666.09 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=4096     	   23233	      7787 ns/op	 525.98 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=16384    	    7480	     23970 ns/op	 683.52 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=16384    	    6000	     30104 ns/op	 544.25 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=65536    	    1886	     95397 ns/op	 686.98 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=65536    	    1496	    119828 ns/op	 546.92 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=sila/size=1048576  	     100	   1525681 ns/op	 687.28 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStreaming/impl=geth/size=1048576  	      88	   1921324 ns/op	 545.76 MB/s	       0 B/op	       0 allocs/op
+PASS

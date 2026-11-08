@@ -1,0 +1,17 @@
+goos: linux
+goarch: arm64
+pkg: github.com/sila-network/sila-core-primitives/keccak
+BenchmarkPermuteVariant/mem-4         	  839353	       281.2 ns/op	 483.64 MB/s
+BenchmarkPermuteVariant/mem-4         	  849272	       281.1 ns/op	 483.86 MB/s
+BenchmarkPermuteVariant/mem-4         	  853088	       281.2 ns/op	 483.64 MB/s
+BenchmarkPermuteVariant/mem-4         	  848431	       281.1 ns/op	 483.79 MB/s
+BenchmarkPermuteVariant/mem-4         	  852364	       281.1 ns/op	 483.83 MB/s
+BenchmarkPermuteVariant/mem-4         	  849105	       281.1 ns/op	 483.84 MB/s
+BenchmarkPermuteVariant/locals-4      	  891087	       267.9 ns/op	 507.63 MB/s
+BenchmarkPermuteVariant/locals-4      	  889504	       267.7 ns/op	 507.98 MB/s
+BenchmarkPermuteVariant/locals-4      	  893739	       268.1 ns/op	 507.35 MB/s
+BenchmarkPermuteVariant/locals-4      	  892512	       267.8 ns/op	 507.75 MB/s
+BenchmarkPermuteVariant/locals-4      	  891352	       267.8 ns/op	 507.79 MB/s
+BenchmarkPermuteVariant/locals-4      	  894357	       267.7 ns/op	 508.02 MB/s
+PASS
+ok  	github.com/sila-network/sila-core-primitives/keccak	2.914s

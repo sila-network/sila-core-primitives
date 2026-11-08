@@ -53,19 +53,28 @@ cd benchmarks/geth-compare && ./run.sh asm && ./run.sh noavx && ./run.sh purego
 
 ## Measured performance (summary)
 
-Intel Xeon (family 6, model 173), Linux VM, Go 1.25.4, `GOAMD64=v1`,
-single core pinned, 10 runs per case, `benchstat` medians. The full tables,
-confidence intervals and p-values are in `docs/PERFORMANCE-2026-11-08.md`.
+SILA vs go-ethereum v1.17.10, same machine, same process, Go 1.25.4,
+`GOAMD64=v1`, 10 interleaved runs per case, `benchstat` (Mann-Whitney,
+p<0.05). The value is geth time / SILA time, geometric mean over 22 cases
+(32 B to 1 MiB, one-shot and streaming); above 1.00× means SILA is faster.
+Full tables, raw data and the list of unmeasured platforms:
+`docs/PERFORMANCE-2026-11-08.md`.
 
-| Comparison | Throughput, 1 MiB | geomean speed-up (all 22 cases) |
-|---|---|---|
-| SILA V1 (original) | 43.8 MB/s | — |
-| SILA AVX-512 vs go-ethereum amd64 asm | 632.7 vs 485.5 MB/s | **SILA 26.5% faster** |
-| SILA portable Go vs go-ethereum amd64 asm | 530.7 vs 482.1 MB/s | SILA 9.7% faster (2 of 22 cases not significant) |
-| SILA portable Go vs go-ethereum portable Go | 526.0 vs 444.7 MB/s | SILA 19.2% faster |
+| CPU (where) | SILA default vs geth default | Cases significant | SILA portable vs geth asm |
+|---|---|---|---|
+| Intel Xeon, model 173 (reference VM) | **1.26×** (AVX-512) | 22/22 | 1.09× (19/22) |
+| Intel Xeon 6973P-C (GitHub) | **1.25×** (AVX-512) | 22/22 | 1.09× (21/22) |
+| AMD EPYC 9V74, Zen 4 (GitHub) | **1.27×** (AVX-512) | 22/22 | 1.10× (22/22) |
+| Arm Neoverse-N2, Linux arm64 (GitHub, 2 images) | **1.11×** | 22/22 | — |
+| Apple M1, virtual, macOS (GitHub) | 1.20× (indicative, very noisy) | 18/22 | — |
 
-These numbers come from **one machine**. They have to be confirmed on the
-target production CPUs before anyone states them as a general result.
+SILA allocates nothing (0 allocs/op, 0 B/op) in every case; geth's
+`Keccak256Hash` allocates once per call. SILA V1 (original) reached
+43.8 MB/s at 1 MiB on the reference VM; V1.1 reaches about 616 MB/s.
+
+Not measured: amd64 CPUs that really lack AVX-512 (simulated by forcing the
+portable kernel), Graviton/Ampere, Apple Silicon on bare metal, and any
+non-amd64/arm64 architecture (correctness only, under QEMU).
 
 ## Technical contract
 

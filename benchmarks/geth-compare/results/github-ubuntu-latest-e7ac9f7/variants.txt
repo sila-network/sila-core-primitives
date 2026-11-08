@@ -1,0 +1,18 @@
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/keccak
+cpu: AMD EPYC 9V74 80-Core Processor                
+BenchmarkPermuteVariant/mem-4         	  718722	       296.8 ns/op	 458.23 MB/s
+BenchmarkPermuteVariant/mem-4         	  805404	       296.4 ns/op	 458.88 MB/s
+BenchmarkPermuteVariant/mem-4         	  805136	       296.8 ns/op	 458.28 MB/s
+BenchmarkPermuteVariant/mem-4         	  793299	       298.6 ns/op	 455.51 MB/s
+BenchmarkPermuteVariant/mem-4         	  809331	       296.5 ns/op	 458.75 MB/s
+BenchmarkPermuteVariant/mem-4         	  806466	       299.6 ns/op	 453.93 MB/s
+BenchmarkPermuteVariant/locals-4      	  659643	       364.2 ns/op	 373.40 MB/s
+BenchmarkPermuteVariant/locals-4      	  660799	       362.6 ns/op	 375.05 MB/s
+BenchmarkPermuteVariant/locals-4      	  643333	       423.4 ns/op	 321.23 MB/s
+BenchmarkPermuteVariant/locals-4      	  658274	       361.4 ns/op	 376.27 MB/s
+BenchmarkPermuteVariant/locals-4      	  656448	       361.6 ns/op	 376.12 MB/s
+BenchmarkPermuteVariant/locals-4      	  660669	       361.4 ns/op	 376.34 MB/s
+PASS
+ok  	github.com/sila-network/sila-core-primitives/keccak	2.930s

@@ -73,6 +73,30 @@ jobs:
       - name: Short fuzz
         run: go test -run '^$' -fuzz FuzzSum256 -fuzztime 30s ./keccak
 
+  cross-arch:
+    name: Other architectures (386 native; s390x big-endian, ppc64le, riscv64 under QEMU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: false
+      - name: Install QEMU user-mode emulators
+        run: sudo apt-get update -q && sudo apt-get install -y -q qemu-user-static
+      - name: 386 (native)
+        run: GOARCH=386 go test -count=1 -short ./...
+      - name: s390x, ppc64le, riscv64 (emulated; correctness only, no timing)
+        run: |
+          for arch in s390x ppc64le riscv64; do
+            echo "== $arch"
+            GOARCH=$arch go vet ./...
+            GOARCH=$arch go test -c -o "$RUNNER_TEMP/keccak.$arch" ./keccak
+            (cd keccak && "qemu-$arch-static" "$RUNNER_TEMP/keccak.$arch" -test.short -test.count=1 -test.v | grep -E '^(--- |PASS|FAIL|ok)')
+          done
+      - name: loong64 (build and vet only; no emulator on the runner image)
+        run: GOARCH=loong64 go vet ./... && GOARCH=loong64 go test -c -o /dev/null ./keccak
+
   independent-verification:
     name: Independent oracle (907 cases)
     runs-on: ubuntu-latest

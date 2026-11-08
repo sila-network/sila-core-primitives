@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# An explicit "bash" makes Actions run "bash --noprofile --norc -eo pipefail",
+# so a failing command piped into grep still fails its step.
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -95,6 +101,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
+        shell: bash
         working-directory: benchmarks/geth-compare
     steps:
       - uses: actions/checkout@v4

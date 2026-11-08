@@ -120,8 +120,18 @@ See `docs/SECURITY-REVIEW-2026-11-08.md` §7.
   `TRADEMARKS.md`.
 - Contributing: `CONTRIBUTING.md`. Security reports: `SECURITY.md`.
 
-## Approval gate
+## Security and approval gates
 
-Do not classify this component as production-ready until an independent
-security audit, review on the target CPUs, production workload benchmarks
-and final network specification approval are complete.
+For **development and review**, require passing CI (Go test, race, fuzzing,
+Keccak known-answer vectors, cross-implementation equivalence and architecture
+checks), GitHub CodeQL analysis, investigation of any security alerts, and
+explicit approval by the project owner. Additional SILA development may
+proceed without waiting for a human auditor; merge is never automatic.
+
+For **production**, use the separate security criteria in `SECURITY.md`:
+threat-model and integration review, supported-platform validation, a
+confidential vulnerability-reporting channel, resolution of critical findings,
+and explicit owner acceptance of residual risk. External specialist auditing
+is strongly recommended for cryptographic code securing real assets.
+Passing automated checks does not guarantee security or establish production
+readiness. This component remains **not approved for production**.

@@ -83,7 +83,9 @@ jobs:
           go-version: "1.25.x"
           cache: false
       - name: Install QEMU user-mode emulators
-        run: sudo apt-get update -q && sudo apt-get install -y -q qemu-user-static
+        # "qemu-user" exists on Ubuntu 24.04 and 26.04; "qemu-user-static" is a
+        # virtual package without an installation candidate on 26.04.
+        run: sudo apt-get update -q && sudo apt-get install -y -q qemu-user
       - name: 386 (native)
         run: GOARCH=386 go test -count=1 -short ./...
       - name: s390x, ppc64le, riscv64 (emulated; correctness only, no timing)
@@ -92,7 +94,8 @@ jobs:
             echo "== $arch"
             GOARCH=$arch go vet ./...
             GOARCH=$arch go test -c -o "$RUNNER_TEMP/keccak.$arch" ./keccak
-            (cd keccak && "qemu-$arch-static" "$RUNNER_TEMP/keccak.$arch" -test.short -test.count=1 -test.v | grep -E '^(--- |PASS|FAIL|ok)')
+            emu=$(command -v "qemu-$arch" || command -v "qemu-$arch-static")
+            (cd keccak && "$emu" "$RUNNER_TEMP/keccak.$arch" -test.short -test.count=1 -test.v | grep -E '^(--- |PASS|FAIL|ok)')
           done
       - name: loong64 (build and vet only; no emulator on the runner image)
         run: GOARCH=loong64 go vet ./... && GOARCH=loong64 go test -c -o /dev/null ./keccak

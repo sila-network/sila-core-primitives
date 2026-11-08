@@ -2,6 +2,29 @@
 
 Date: 2026-11-08
 
+## Revision 3 (V1.1, review round 2)
+
+- New tests, all passing on Go 1.23.4 and 1.25.4, default and `purego`,
+  with and without `-race`:
+  - official Keccak team KATs from KeccakKAT-3.zip: 256 short and 65 long
+    byte-aligned messages, 100 Monte Carlo checkpoints, and the 1 GiB
+    ExtremelyLongMsgKAT, which runs without `-race`;
+  - Ethereum ERC-20 event topics and function selectors;
+  - inputs at every byte offset within a word, and 16 goroutines hashing concurrently;
+  - preemption regression: concurrent `runtime.GC()` while hashing 256 MiB;
+  - AVX-512 decision-rule table, GODEBUG parsing, and an end-to-end
+    `GODEBUG=cpu.avx512=off` subprocess;
+  - chunked absorb against the portable loop around the chunk size;
+  - generated assembly executed by an emulator, compared with a
+    specification-level permutation, with 5 deliberate mutations all
+    detected;
+  - both portable kernel shapes against the reference.
+- Coverage: keccak 99.6% (amd64), 100.0% (`purego`).
+- GitHub Actions, for every pushed commit: Go 1.23 and 1.25 on
+  ubuntu-latest (Intel Xeon Platinum 8573C with AVX-512) and
+  ubuntu-24.04-arm (Neoverse-N2); vet, tests, race, purego, generated files
+  check, fuzz, the 907-case independent oracle, and go-ethereum equivalence.
+
 ## Revision 2 (V1.1: optimized kernels)
 
 - Platform: linux/amd64, Intel Xeon (family 6, model 173), AVX-512F/VL present.

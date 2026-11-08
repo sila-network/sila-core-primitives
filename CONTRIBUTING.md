@@ -23,9 +23,12 @@ change is reviewed.
 
 ## Licensing of contributions
 
-The project is licensed under Apache License 2.0. Under Section 5 of that
-license, any contribution you intentionally submit is provided under the same
-license, unless you state otherwise in writing. Add the line
+The project is licensed under Apache License 2.0, and the rights in the
+project's original code belong to Ahmed Ibrahim (see `NOTICE`). Under
+Section 5 of that license, any contribution you intentionally submit is
+provided under the same license, unless you state otherwise in writing. You
+keep the copyright in your contribution; it is not transferred to the
+project owner unless you sign a separate written agreement. Add the line
 `// SPDX-License-Identifier: Apache-2.0` at the top of new source files.
 
 ## Authorship

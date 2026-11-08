@@ -13,7 +13,16 @@ features. Section 6 of the license says so explicitly:
 ## Ownership
 
 "SILA", the SILA logo and related marks ("SILA Marks") identify the SILA
-project and belong to [SILA LEGAL ENTITY — NAME TO BE CONFIRMED].
+project. **Ahmed Ibrahim** has declared ownership of the SILA Marks.
+
+This policy does not assert that any SILA Mark is registered in any
+jurisdiction. If a mark is registered, its registration details will be
+added here; until then the claim rests on Ahmed Ibrahim's declared
+ownership and on use of the marks for the SILA project.
+
+"SILA Network" (the `sila-network` GitHub organization) names the technical
+organization that hosts the project. It is not the owner of the SILA Marks
+or of the copyright in the code.
 
 ## Permitted without asking
 
@@ -41,5 +50,5 @@ file and the attribution it contains.
 
 ## Contact
 
-Permission requests go to the project maintainers through the official
+Permission requests go to Ahmed Ibrahim, through the project's official
 `sila-network` GitHub organization.

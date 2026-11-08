@@ -2,6 +2,11 @@
 
 ## V1.1 — review round 2 (2026-11-08)
 
+- Ownership: `NOTICE` now reads "Copyright 2026 Ahmed Ibrahim", replacing
+  the placeholder. `TRADEMARKS.md` names Ahmed Ibrahim as the owner who
+  declared ownership of the SILA name and logo, without claiming a
+  registration. "SILA Network" is the hosting organization, not the
+  rights holder.
 - Output unchanged.
 - **Fix (availability):** the AVX-512 path is now preemptible. Hashing a
   very large input previously blocked a concurrent GC stop-the-world for
@@ -34,6 +39,5 @@
 - Extended tests: KAT and boundary vectors, every length and split point,
   random chunking, fuzzing, guard-page over-read test, zero-allocation test,
   fallback test, and a stale-generated-file check.
-- License: Apache-2.0 adopted (LICENSE, SPDX headers). The NOTICE copyright
-  line holds a placeholder until the legal entity name is confirmed.
+- License: Apache-2.0 adopted (LICENSE, SPDX headers).
 - Added NOTICE, TRADEMARKS.md, CONTRIBUTING.md and SECURITY.md.

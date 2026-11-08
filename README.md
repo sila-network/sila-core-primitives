@@ -100,10 +100,13 @@ See `docs/SECURITY-REVIEW-2026-11-08.md` §7.
 
 - Code: **Apache License 2.0**, full text in `LICENSE`. Source files carry
   `SPDX-License-Identifier: Apache-2.0`.
-- Copyright: see `NOTICE`. The copyright holder is the legal entity that owns
-  SILA. **Its registered legal name has not been confirmed yet**, and the
-  `[SILA LEGAL ENTITY — NAME TO BE CONFIRMED]` placeholder must be replaced
-  before any release.
+- Copyright: `Copyright 2026 Ahmed Ibrahim` (see `NOTICE`). Ahmed Ibrahim
+  is the personal owner of the rights in the project's original code.
+  "SILA Network" is the name of the technical organization that hosts the
+  project, not the copyright holder.
+- Contributions by other people remain the copyright of their authors and
+  are licensed under Apache-2.0 (Section 5 of the license); see
+  `CONTRIBUTING.md`.
 - Trademarks: the code license does not cover the SILA name or logo; see
   `TRADEMARKS.md`.
 - Contributing: `CONTRIBUTING.md`. Security reports: `SECURITY.md`.

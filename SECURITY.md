@@ -49,9 +49,15 @@ until the separate production gates are satisfied.
 
 ## Reporting a vulnerability
 
-**Do not open a public issue.** Report it privately through GitHub's
-"Report a vulnerability" button (Security tab → Advisories) on
-`sila-network/sila-core-primitives`.
+**Do not disclose vulnerability details in a public issue.** If GitHub
+private vulnerability reporting is enabled for
+`sila-network/sila-core-primitives`, use the "Report a vulnerability"
+entry under Security → Advisories.
+
+If that option is not available, do **not** post reproduction details
+publicly. Ask the project maintainers to provide a private reporting
+channel without disclosing the vulnerability itself. Enabling confidential
+reporting is a prerequisite for any production release.
 
 Please include:
 

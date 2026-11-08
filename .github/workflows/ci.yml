@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: Apache-2.0
+name: CI
+
+on:
+  push:
+    branches: [main, "dev/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Go ${{ matrix.go }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+        go: ["1.23.x", "1.25.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+
+      - name: Report CPU and selected kernel
+        run: |
+          go version
+          uname -m
+          grep -m1 'model name' /proc/cpuinfo || true
+          grep -o -w -E 'avx512f|avx512vl' /proc/cpuinfo | sort -u || echo "no AVX-512 flags"
+          go test -count=1 -run 'TestAVX512Kernels' -v ./keccak | grep -E 'SKIP|PASS|FAIL|ok' || true
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "unformatted files:"; echo "$out"; exit 1; fi
+
+      - name: go vet
+        run: |
+          go vet ./...
+          go vet -tags purego ./...
+
+      - name: Tests (default kernels)
+        run: go test -count=1 -cover ./...
+
+      - name: Tests (portable kernel, -tags purego)
+        run: go test -count=1 -cover -tags purego ./...
+
+      - name: Race detector
+        run: |
+          go test -count=1 -race ./...
+          go test -count=1 -race -tags purego ./...
+
+      - name: Generated kernels are up to date
+        run: |
+          (cd keccak && go generate)
+          git diff --exit-code -- keccak/
+
+      - name: Short fuzz
+        run: go test -run '^$' -fuzz FuzzSum256 -fuzztime 30s ./keccak
+
+  independent-verification:
+    name: Independent oracle (907 cases)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install oracle
+        run: python -m pip install pycryptodome==4.4.0
+      - name: Build binaries
+        run: |
+          go build -o "$RUNNER_TEMP/sila-keccak256" ./cmd/sila-keccak256
+          go build -tags purego -o "$RUNNER_TEMP/sila-keccak256-purego" ./cmd/sila-keccak256
+      - name: Verify default build
+        run: python -I scripts/verify_independent.py "$RUNNER_TEMP/sila-keccak256"
+      - name: Verify portable build
+        run: python -I scripts/verify_independent.py "$RUNNER_TEMP/sila-keccak256-purego"
+
+  geth-equivalence:
+    name: Equivalence with go-ethereum v1.17.10
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: benchmarks/geth-compare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: false
+      - name: go vet
+        run: go vet .
+      - name: Same output as go-ethereum (all kernels)
+        run: |
+          go test -count=1 -run 'TestSameOutput|TestRandomAgainstGeth|TestDispatchReport' -v . | grep -E 'enabled|^(ok|FAIL|---)'
+          go test -count=1 -run 'TestSameOutput|TestRandomAgainstGeth' . -args -sila.noavx512
+          go test -count=1 -tags purego -run 'TestSameOutput|TestRandomAgainstGeth' .
+      # Performance is measured on dedicated hardware with run.sh, not on
+      # shared CI runners whose timings are not comparable.

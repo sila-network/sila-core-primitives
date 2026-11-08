@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // sila-keccak256 computes the Keccak-256 digest of standard input.
 package main
 
@@ -7,7 +9,7 @@ import (
 	"io"
 	"os"
 
-	"sila/core-primitives/keccak"
+	"github.com/sila-network/sila-core-primitives/keccak"
 )
 
 func main() {

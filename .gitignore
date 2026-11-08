@@ -1,0 +1,6 @@
+# Build outputs
+/sila-keccak256
+/sila-keccak256-*
+*.test
+*.out
+# Local fuzz corpus noise (failing inputs are kept under testdata/fuzz)

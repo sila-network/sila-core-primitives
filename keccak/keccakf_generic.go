@@ -35,11 +35,11 @@ var roundConstant = [24]uint64{
 	0x8000000080008008, // RC[23]
 }
 
-// permuteGeneric applies the 24 rounds of Keccak-f[1600] to a.
+// permuteGenericMem applies the 24 rounds of Keccak-f[1600] to a.
 // Lanes 1, 2, 8, 12, 17 and 20 are held inverted between rounds
 // (lane complementing) and restored before returning.
 // Generator variant: mem.
-func permuteGeneric(a *[25]uint64) {
+func permuteGenericMem(a *[25]uint64) {
 	a[1] = ^a[1]
 	a[2] = ^a[2]
 	a[8] = ^a[8]

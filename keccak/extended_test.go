@@ -226,3 +226,37 @@ func BenchmarkPermute(b *testing.B) {
 		permute(&s)
 	}
 }
+
+// Both portable variants must agree with the reference; the benchmark
+// below decides per architecture which one is used.
+func TestPortableVariantsAgree(t *testing.T) {
+	rng := rand.New(rand.NewSource(31))
+	for i := 0; i < 5000; i++ {
+		var s [25]uint64
+		for j := range s {
+			s[j] = rng.Uint64()
+		}
+		ref, m, l := s, s, s
+		permuteReference(&ref)
+		permuteGenericMem(&m)
+		permuteGenericLocals(&l)
+		if m != ref || l != ref {
+			t.Fatalf("portable variant differs at %d", i)
+		}
+	}
+}
+
+func BenchmarkPermuteVariant(b *testing.B) {
+	for _, v := range []struct {
+		name string
+		f    func(*[25]uint64)
+	}{{"mem", permuteGenericMem}, {"locals", permuteGenericLocals}} {
+		b.Run(v.name, func(b *testing.B) {
+			var s [25]uint64
+			b.SetBytes(Rate)
+			for i := 0; i < b.N; i++ {
+				v.f(&s)
+			}
+		})
+	}
+}

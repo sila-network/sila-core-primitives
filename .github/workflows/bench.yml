@@ -61,13 +61,21 @@ jobs:
           echo "modes: $modes"
           for m in $modes; do ./run.sh "$m"; done
 
+      - name: Portable kernel variants (mem vs locals)
+        working-directory: keccak
+        run: |
+          go test -run '^$' -bench PermuteVariant -count 6 -benchtime 200ms . | tee "$RESULTS/variants.txt"
+          "$(go env GOPATH)/bin/benchstat" -col /PermuteVariant "$RESULTS/variants.txt" 2>/dev/null || \
+            "$(go env GOPATH)/bin/benchstat" "$RESULTS/variants.txt"
+
       - name: Summarise
         run: |
           {
             echo "## ${{ matrix.os }}"
             head -5 "$RESULTS/asm.txt" | sed 's/^/    /'
           } >> "$GITHUB_STEP_SUMMARY"
-          for f in "$RESULTS"/*.txt; do
+          for f in "$RESULTS"/asm.txt "$RESULTS"/noavx.txt "$RESULTS"/purego.txt; do
+            [ -f "$f" ] || continue
             m=$(basename "$f" .txt)
             "$(go env GOPATH)/bin/benchstat" -format csv -col /impl -row .name,/size "$f" > "$RESULTS/$m.csv"
             {

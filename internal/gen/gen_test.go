@@ -46,9 +46,18 @@ func TestChiFormsExact(t *testing.T) {
 
 // Generated sources in ../../keccak must match the generator exactly.
 func TestGeneratedFilesUpToDate(t *testing.T) {
+	goWith := func(variant, fn string, rc bool) func() []byte {
+		return func() []byte {
+			v, f, r := *goVariant, *goFunc, *goRC
+			defer func() { *goVariant, *goFunc, *goRC = v, f, r }()
+			*goVariant, *goFunc, *goRC = variant, fn, rc
+			return genGo()
+		}
+	}
 	for file, gen := range map[string]func() []byte{
-		"../../keccak/keccakf_generic.go":     genGo,
-		"../../keccak/keccakf_avx512_amd64.s": genAsm,
+		"../../keccak/keccakf_generic.go":        goWith("mem", "permuteGenericMem", true),
+		"../../keccak/keccakf_generic_locals.go": goWith("locals", "permuteGenericLocals", false),
+		"../../keccak/keccakf_avx512_amd64.s":    genAsm,
 	} {
 		disk, err := os.ReadFile(file)
 		if err != nil {

@@ -6,6 +6,41 @@ SILA Core Primitives has **not** been independently security-audited and is
 **not approved for production use**. The internal review is in
 `docs/SECURITY-REVIEW-2026-11-08.md`.
 
+## Security gates for development and production
+
+We use separate acceptance gates so that security work does not prevent
+development of other SILA components.
+
+**Development / PR acceptance (not production approval):**
+- All required GitHub Actions CI jobs must pass on the exact proposed commit:
+  Go tests, race detection, architecture checks, known-answer vectors,
+  independent oracle comparisons, differential equivalence and fuzzing.
+- GitHub CodeQL security analysis for Go, Python and Actions must complete.
+  Any findings must be reviewed; unresolved high/critical security findings
+  block acceptance. A successful workflow alone does not prove zero alerts.
+- Relevant review feedback must be addressed and the project owner must
+  explicitly approve a merge. No automatic merging.
+- Independent human auditing is **not a prerequisite for continuing
+  development** or for merging a version explicitly marked non-production.
+
+**Production adoption (separate decision):**
+- Establish the consuming protocol's serialization, threat model, security
+  requirements, supported CPU/OS targets, and safe deployment boundaries.
+- Verify Keccak vectors and equivalence on each supported build and platform,
+  review the generated assembly and CPU dispatch, and investigate all open
+  high/critical findings.
+- Obtain independent security evidence beyond the implementation team's own
+  claims. External expert auditing is strongly recommended, especially before
+  securing real assets; automated analysis alone is not a proof of safety.
+- Enable a confidential vulnerability reporting route, document outstanding
+  limitations and residual risks, and obtain an explicit production release
+  decision from the owner. Do not claim "100% secure."
+
+The GitHub CodeQL workflow is in `.github/workflows/codeql.yml`; its results
+are security signals, not a formal proof of cryptographic or assembly
+correctness. Current code must remain labeled **not approved for production**
+until the separate production gates are satisfied.
+
 ## Supported versions
 
 | Version | Supported |

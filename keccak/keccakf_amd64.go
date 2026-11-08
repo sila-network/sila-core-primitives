@@ -63,23 +63,40 @@ func avx512Usable(maxLeaf, ecx1, xcr0, ebx7 uint32) bool {
 	return ebx7&cpuidAVX512F != 0 && ebx7&cpuidAVX512VL != 0
 }
 
-// godebugDisablesAVX512 honours the same GODEBUG switches the Go runtime
-// uses to turn CPU features off (cpu.all, cpu.avx512, cpu.avx512f,
-// cpu.avx512vl), so operators can force the portable kernel, for example
-// on a CPU with a known AVX-512 erratum. The last setting wins.
+// godebugDisablesAVX512 honours the GODEBUG switches the Go runtime uses
+// for CPU features, so operators can force the portable kernel (for
+// example on a CPU with a known AVX-512 erratum). Each required feature
+// (AVX512F, AVX512VL) has its own state, processed left to right:
+//
+//   - cpu.avx512f=on|off and cpu.avx512vl=on|off set that feature;
+//   - cpu.avx512=on|off sets both (SILA alias);
+//   - cpu.all=off disables both; cpu.all accepts only "off", as in Go;
+//   - any other value is ignored.
+//
+// "on" never enables hardware support; it only cancels an earlier "off".
+// The AVX-512 kernel is disabled if any required feature ends up off.
 func godebugDisablesAVX512(godebug string) bool {
-	off := false
+	f, vl := true, true
 	for _, kv := range strings.Split(godebug, ",") {
 		k, v, ok := strings.Cut(strings.TrimSpace(kv), "=")
-		if !ok {
+		if !ok || (v != "on" && v != "off") {
 			continue
 		}
+		on := v == "on"
 		switch k {
-		case "cpu.all", "cpu.avx512", "cpu.avx512f", "cpu.avx512vl":
-			off = v == "off"
+		case "cpu.all":
+			if !on {
+				f, vl = false, false
+			}
+		case "cpu.avx512":
+			f, vl = on, on
+		case "cpu.avx512f":
+			f = on
+		case "cpu.avx512vl":
+			vl = on
 		}
 	}
-	return off
+	return !(f && vl)
 }
 
 // maxBlocksPerAsmCall bounds the time spent inside one non-preemptible

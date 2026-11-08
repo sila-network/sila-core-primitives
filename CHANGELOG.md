@@ -13,7 +13,13 @@
   the whole hash (~1 s for 512 MiB); now ~1 ms. Inputs go to the assembly
   kernel in chunks of at most 64 blocks, through a non-inlined Go wrapper.
 - CPU dispatch: pure, table-tested decision rule; `GODEBUG=cpu.avx512=off`
-  (and cpu.all / cpu.avx512f / cpu.avx512vl) is honoured.
+  (and cpu.all / cpu.avx512f / cpu.avx512vl) is honoured, with a separate
+  state per required feature (a later `cpu.avx512vl=on` no longer cancels
+  `cpu.avx512f=off`; review finding).
+- The preemption regression test now measures scheduling latency with a
+  single P instead of the wall-clock time of runtime.GC(), which was flaky
+  under GOMAXPROCS=1 and did not detect the original defect there (review
+  finding).
 - An emulator test executes the generated assembly text on any platform and
   checks semantics, memory bounds, register use and register clearing.
 - Official Keccak team KATs (short, long, Monte Carlo, 1 GiB), Ethereum

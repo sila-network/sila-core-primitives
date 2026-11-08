@@ -54,6 +54,18 @@ func TestGODEBUGSwitches(t *testing.T) {
 		"cpu.avx2=off":                   false,
 		"cpu.avx512":                     false,
 		"madvdontneed=1,cpu.avx512f=off": true,
+		// Each required feature is tracked separately (review finding):
+		// re-enabling one feature must not cancel disabling the other.
+		"cpu.avx512f=off,cpu.avx512vl=on":            true,
+		"cpu.avx512vl=off,cpu.avx512f=on":            true,
+		"cpu.all=off,cpu.avx512f=on":                 true,
+		"cpu.all=off,cpu.avx512vl=on":                true,
+		"cpu.all=off,cpu.avx512=on":                  false,
+		"cpu.all=off,cpu.avx512f=on,cpu.avx512vl=on": false,
+		"cpu.avx512f=off,cpu.avx512f=on":             false,
+		"cpu.all=on":                                 false, // cpu.all accepts only off
+		"cpu.avx512f=no":                             false, // invalid value ignored
+		"cpu.avx512f=off,cpu.avx512vl=bad":           true,
 	}
 	for in, want := range cases {
 		if got := godebugDisablesAVX512(in); got != want {
@@ -96,13 +108,15 @@ func TestGODEBUGEndToEnd(t *testing.T) {
 		}
 		return
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=^TestGODEBUGEndToEnd$", "-test.count=1")
-	cmd.Env = append(os.Environ(), "SILA_CHILD=1", "GODEBUG=cpu.avx512=off")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("child failed: %v\n%s", err, out)
-	}
-	if !strings.Contains(string(out), "useAVX512=false") || strings.Contains(string(out), "WRONG") {
-		t.Fatalf("GODEBUG=cpu.avx512=off not honoured:\n%s", out)
+	for _, godebug := range []string{"cpu.avx512=off", "cpu.avx512f=off,cpu.avx512vl=on"} {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestGODEBUGEndToEnd$", "-test.count=1")
+		cmd.Env = append(os.Environ(), "SILA_CHILD=1", "GODEBUG="+godebug)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("child failed: %v\n%s", err, out)
+		}
+		if !strings.Contains(string(out), "useAVX512=false") || strings.Contains(string(out), "WRONG") {
+			t.Fatalf("GODEBUG=%s not honoured:\n%s", godebug, out)
+		}
 	}
 }

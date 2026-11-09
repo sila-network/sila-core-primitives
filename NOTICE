@@ -1,0 +1,12 @@
+SILA Core Primitives
+Copyright 2026 Ahmed Ibrahim
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+"SILA" and the SILA logo are claimed by Ahmed Ibrahim as marks of the SILA
+project. The Apache License does not grant permission to use them; see
+TRADEMARKS.md.
+
+This product includes Keccak known-answer test vectors published by the
+Keccak team (G. Bertoni, J. Daemen, M. Peeters, G. Van Assche), reproduced
+unchanged for verification only; see keccak/testdata/kat/README.md.

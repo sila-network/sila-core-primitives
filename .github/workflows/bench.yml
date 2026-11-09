@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Head-to-head benchmark of SILA Keccak-256 against go-ethereum v1.17.10 on
+# GitHub-hosted runners. These are shared virtual machines: numbers are
+# indicative and noisier than dedicated hardware, but each job compares
+# both implementations on the same machine, in the same process, with the
+# same toolchain, so the ratio is meaningful. Raw outputs are uploaded as
+# artifacts and summarised on the run page.
+
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "keccak/**"
+      - "internal/gen/**"
+      - "benchmarks/**"
+      - ".github/workflows/bench.yml"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bench:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-22.04, ubuntu-24.04-arm, ubuntu-22.04-arm, macos-latest]
+    defaults:
+      run:
+        shell: bash
+        working-directory: benchmarks/geth-compare
+    env:
+      RESULTS: ${{ github.workspace }}/bench-results
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: false
+
+      - name: Install benchstat
+        run: GOTOOLCHAIN=go1.26.0 go install golang.org/x/perf/cmd/benchstat@v0.0.0-20261009192801-be2c69fb417e
+
+      - name: Machine
+        run: |
+          uname -a
+          (lscpu || sysctl -a | grep -E 'machdep.cpu.brand_string|hw.ncpu|hw.memsize') 2>/dev/null | head -30
+
+      - name: Run benchmarks
+        run: |
+          if [ "$(go env GOARCH)" = "amd64" ]; then modes="asm noavx purego"; else modes="asm"; fi
+          echo "modes: $modes"
+          for m in $modes; do ./run.sh "$m"; done
+
+      - name: Portable kernel variants (mem vs locals)
+        working-directory: keccak
+        run: |
+          go test -run '^$' -bench PermuteVariant -count 6 -benchtime 200ms . | tee "$RESULTS/variants.txt"
+          "$(go env GOPATH)/bin/benchstat" -col /PermuteVariant "$RESULTS/variants.txt" 2>/dev/null || \
+            "$(go env GOPATH)/bin/benchstat" "$RESULTS/variants.txt"
+
+      - name: Summarise
+        run: |
+          {
+            echo "## ${{ matrix.os }}"
+            head -5 "$RESULTS/asm.txt" | sed 's/^/    /'
+          } >> "$GITHUB_STEP_SUMMARY"
+          for f in "$RESULTS"/asm.txt "$RESULTS"/noavx.txt "$RESULTS"/purego.txt; do
+            [ -f "$f" ] || continue
+            m=$(basename "$f" .txt)
+            "$(go env GOPATH)/bin/benchstat" -format csv -col /impl -row .name,/size "$f" > "$RESULTS/$m.csv"
+            {
+              echo
+              echo "### mode: $m"
+              echo
+              python3 -I summarize.py "$RESULTS/$m.csv" "$f"
+              echo
+              grep '^geomean' "$RESULTS/$m.csv" | head -1
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.os }}
+          path: bench-results/
+          if-no-files-found: error

@@ -1,16 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package keccak implements the Keccak-256 sponge for SILA Core Primitives.
 //
 // This package uses the original Keccak domain suffix (0x01), not the
-// standardized SHA3-256 suffix (0x06). It has no external dependencies.
+// standardized SHA3-256 suffix (0x06), so its output is identical to the
+// Keccak-256 used by Ethereum. It has no external dependencies.
 //
 // It is a reference implementation. Production adoption requires an
-// independent cryptographic review and implementation hardening.
+// independent cryptographic review.
 package keccak
 
 import (
 	"encoding/binary"
 	"hash"
-	"math/bits"
 )
 
 const (
@@ -22,6 +24,8 @@ const (
 
 // Digest implements hash.Hash with Keccak-256 padding and 24-round Keccak-f[1600].
 // A Digest should not be used concurrently by multiple goroutines.
+//
+// Invariant: 0 <= used < Rate and pending[used:] is all zero.
 type Digest struct {
 	lanes   [25]uint64
 	pending [Rate]byte
@@ -34,10 +38,18 @@ var _ hash.Hash = (*Digest)(nil)
 func New() hash.Hash { return &Digest{} }
 
 // Sum256 computes Keccak-256 for the supplied bytes without retaining state.
-func Sum256(data []byte) [Size]byte {
-	var d Digest
-	_, _ = d.Write(data)
-	return d.finalize()
+// It does not allocate and does not modify data.
+func Sum256(data []byte) (out [Size]byte) {
+	var a [25]uint64
+	full := len(data) - len(data)%Rate
+	absorb(&a, data[:full])
+	data = data[full:]
+	var last [Rate]byte
+	n := copy(last[:], data)
+	pad(&last, n)
+	absorb(&a, last[:])
+	squeeze(&out, &a)
+	return out
 }
 
 // Write absorbs data in order. It never returns a non-nil error.
@@ -52,27 +64,33 @@ func (d *Digest) Write(data []byte) (int, error) {
 		if d.used < Rate {
 			return total, nil
 		}
-		if d.used == Rate {
-			absorb(&d.lanes, d.pending[:])
-			d.used = 0
-			clear(d.pending[:])
-		}
+		absorb(&d.lanes, d.pending[:])
+		d.used = 0
+		clear(d.pending[:])
 	}
 
-	// Full blocks can be absorbed directly from the input.
-	for len(data) >= Rate {
-		absorb(&d.lanes, data[:Rate])
-		data = data[Rate:]
-	}
+	// Full blocks are absorbed directly from the caller's slice.
+	full := len(data) - len(data)%Rate
+	absorb(&d.lanes, data[:full])
+	data = data[full:]
 	d.used = copy(d.pending[:], data)
 	return total, nil
 }
 
 // Sum appends the digest to b without changing the running hash state.
 func (d *Digest) Sum(b []byte) []byte {
-	copyOfDigest := *d
-	result := copyOfDigest.finalize()
-	return append(b, result[:]...)
+	var out [Size]byte
+	d.sum(&out)
+	return append(b, out[:]...)
+}
+
+// sum finalizes a copy of the state; d itself is not modified.
+func (d *Digest) sum(out *[Size]byte) {
+	a := d.lanes
+	last := d.pending
+	pad(&last, d.used)
+	absorb(&a, last[:])
+	squeeze(out, &a)
 }
 
 // Reset clears the entire state so a Digest can be reused.
@@ -84,85 +102,48 @@ func (d *Digest) Size() int { return Size }
 // BlockSize returns the Keccak-256 absorption rate in bytes.
 func (d *Digest) BlockSize() int { return Rate }
 
-func (d *Digest) finalize() [Size]byte {
-	// pad10*1 with Keccak's legacy 0x01 suffix.
-	// A full tail is already absorbed by Write, leaving used < Rate.
-	d.pending[d.used] ^= 0x01
-	d.pending[Rate-1] ^= 0x80
-	absorb(&d.lanes, d.pending[:])
-	var out [Size]byte
-	for i := 0; i < Size/8; i++ {
-		binary.LittleEndian.PutUint64(out[i*8:], d.lanes[i])
+// pad applies pad10*1 with Keccak's legacy 0x01 domain suffix to a block
+// holding n < Rate message bytes followed by zeros. When n == Rate-1 both
+// markers land in the same byte (0x81).
+func pad(b *[Rate]byte, n int) {
+	b[n] ^= 0x01
+	b[Rate-1] ^= 0x80
+}
+
+// xorBlock XORs one rate-sized block into the first 17 lanes (little-endian).
+func xorBlock(a *[25]uint64, b *[Rate]byte) {
+	a[0] ^= binary.LittleEndian.Uint64(b[0:])
+	a[1] ^= binary.LittleEndian.Uint64(b[8:])
+	a[2] ^= binary.LittleEndian.Uint64(b[16:])
+	a[3] ^= binary.LittleEndian.Uint64(b[24:])
+	a[4] ^= binary.LittleEndian.Uint64(b[32:])
+	a[5] ^= binary.LittleEndian.Uint64(b[40:])
+	a[6] ^= binary.LittleEndian.Uint64(b[48:])
+	a[7] ^= binary.LittleEndian.Uint64(b[56:])
+	a[8] ^= binary.LittleEndian.Uint64(b[64:])
+	a[9] ^= binary.LittleEndian.Uint64(b[72:])
+	a[10] ^= binary.LittleEndian.Uint64(b[80:])
+	a[11] ^= binary.LittleEndian.Uint64(b[88:])
+	a[12] ^= binary.LittleEndian.Uint64(b[96:])
+	a[13] ^= binary.LittleEndian.Uint64(b[104:])
+	a[14] ^= binary.LittleEndian.Uint64(b[112:])
+	a[15] ^= binary.LittleEndian.Uint64(b[120:])
+	a[16] ^= binary.LittleEndian.Uint64(b[128:])
+}
+
+// absorbGeneric is the portable absorb loop.
+func absorbGeneric(a *[25]uint64, data []byte) {
+	for len(data) >= Rate {
+		xorBlock(a, (*[Rate]byte)(data))
+		permuteGeneric(a)
+		data = data[Rate:]
 	}
-	return out
 }
 
-func absorb(a *[25]uint64, block []byte) {
-	for lane := 0; lane < Rate/8; lane++ {
-		a[lane] ^= binary.LittleEndian.Uint64(block[lane*8:])
-	}
-	permute(a)
-}
-
-var rotation = [25]int{
-	0, 1, 62, 28, 27,
-	36, 44, 6, 55, 20,
-	3, 10, 43, 25, 39,
-	41, 45, 15, 21, 8,
-	18, 2, 61, 56, 14,
-}
-
-var roundConstant = [24]uint64{
-	0x0000000000000001, 0x0000000000008082,
-	0x800000000000808a, 0x8000000080008000,
-	0x000000000000808b, 0x0000000080000001,
-	0x8000000080008081, 0x8000000000008009,
-	0x000000000000008a, 0x0000000000000088,
-	0x0000000080008009, 0x000000008000000a,
-	0x000000008000808b, 0x800000000000008b,
-	0x8000000000008089, 0x8000000000008003,
-	0x8000000000008002, 0x8000000000000080,
-	0x000000000000800a, 0x800000008000000a,
-	0x8000000080008081, 0x8000000000008080,
-	0x0000000080000001, 0x8000000080008008,
-}
-
-// permute applies all 24 rounds of Keccak-f[1600].
-// State lane index is x + 5*y; each lane is little-endian.
-func permute(a *[25]uint64) {
-	var c, d [5]uint64
-	var b [25]uint64
-	for _, rc := range roundConstant {
-		// Theta: mix neighboring columns.
-		for x := 0; x < 5; x++ {
-			c[x] = a[x] ^ a[x+5] ^ a[x+10] ^ a[x+15] ^ a[x+20]
-		}
-		for x := 0; x < 5; x++ {
-			d[x] = c[(x+4)%5] ^ bits.RotateLeft64(c[(x+1)%5], 1)
-		}
-		for y := 0; y < 5; y++ {
-			for x := 0; x < 5; x++ {
-				a[x+5*y] ^= d[x]
-			}
-		}
-
-		// Rho and Pi: rotate lanes and permute their coordinates.
-		for y := 0; y < 5; y++ {
-			for x := 0; x < 5; x++ {
-				src := x + 5*y
-				dst := y + 5*((2*x+3*y)%5)
-				b[dst] = bits.RotateLeft64(a[src], rotation[src])
-			}
-		}
-
-		// Chi: non-linear row substitution.
-		for y := 0; y < 5; y++ {
-			for x := 0; x < 5; x++ {
-				a[x+5*y] = b[x+5*y] ^ (^b[(x+1)%5+5*y] & b[(x+2)%5+5*y])
-			}
-		}
-
-		// Iota: inject the round constant into the first lane.
-		a[0] ^= rc
-	}
+// squeeze writes the first 32 bytes of the state (little-endian lanes).
+func squeeze(out *[Size]byte, a *[25]uint64) {
+	binary.LittleEndian.PutUint64(out[0:], a[0])
+	binary.LittleEndian.PutUint64(out[8:], a[1])
+	binary.LittleEndian.PutUint64(out[16:], a[2])
+	binary.LittleEndian.PutUint64(out[24:], a[3])
 }

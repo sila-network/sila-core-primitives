@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: Apache-2.0
+# One-time official SILA Keccak-256 library release. Never runs on PR code.
+name: Publish first SILA Core Primitive
+
+on:
+  workflow_run:
+    workflows: ["CI", "GitHub CodeQL security scan"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: read
+  security-events: read
+
+concurrency:
+  group: sila-core-primitives-v1.1.0
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish v1.1.0 after verified main checks
+    if: ${{ github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check main SHA and independent GitHub workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          if [ "$SHA" != "$SOURCE_SHA" ]; then
+            echo "Workflow result is stale: $SOURCE_SHA != $SHA. Skip."
+            exit 0
+          fi
+          if gh release view v1.1.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v1.1.0 already exists; skip."
+            exit 0
+          fi
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${SHA}&per_page=100" > "$RUNNER_TEMP/runs.json"
+          for workflow in "CI" "GitHub CodeQL security scan"; do
+            conclusion="$(jq -r --arg name "$workflow" '[.workflow_runs[] | select(.name == $name and .event == "push")] | sort_by(.created_at) | last | .conclusion // "not_completed"' "$RUNNER_TEMP/runs.json")"
+            echo "$workflow: $conclusion"
+            if [ "$conclusion" != "success" ]; then
+              echo "Not publishing: required GitHub checks are not both successful."
+              exit 0
+            fi
+          done
+
+          # An accessible code-scanning result is mandatory: fail closed on API errors.
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/code-scanning/alerts?state=open&per_page=100" --jq '.[] | select((.rule.security_severity_level == "critical") or (.rule.security_severity_level == "high") or (.rule.severity == "error")) | .number' > "$RUNNER_TEMP/blocking-alerts.txt"
+          if [ -s "$RUNNER_TEMP/blocking-alerts.txt" ]; then
+            echo "Blocking open CodeQL alerts:"
+            cat "$RUNNER_TEMP/blocking-alerts.txt"
+            exit 1
+          fi
+          echo "RELEASE_SHA=$SHA" >> "$GITHUB_ENV"
+          echo "Security release gate passed for $SHA."
+
+      - name: Checkout approved SILA code
+        if: env.RELEASE_SHA != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          persist-credentials: false
+
+      - name: Create initial SILA release
+        if: env.RELEASE_SHA != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.1.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Already released."
+            exit 0
+          fi
+          cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
+          # SILA Keccak-256 V1.1 — First Official Core Primitive
+
+          Standalone SILA Go module providing Keccak-256 (legacy padding 0x01, not FIPS SHA3-256).
+          Includes one-shot and streaming hashing, CPU-dispatched AVX-512 and portable kernels.
+
+          **Install:** `go get github.com/sila-network/sila-core-primitives@v1.1.0`
+
+          **Verification:** Official Keccak known-answer vectors, independent library comparisons,
+          Go race/fuzz tests, multi-architecture CI and GitHub CodeQL; see repository documentation.
+          **License:** Apache-2.0. **Copyright:** 2026 Ahmed Ibrahim.
+
+          This release publishes the first SILA library for integration into the planned SILA network.
+          The SILA blockchain network, serialization and consensus integration are NOT delivered by
+          this release. Security checks are not a guarantee of absence of vulnerabilities.
+          No independent external audit has been completed; evaluate deployment risks before
+          protecting real assets. See SECURITY.md for disclosure and production integration gates.
+          EOF
+          gh release create v1.1.0 --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_SHA" \
+            --title "SILA Keccak-256 v1.1.0 — First Core Primitive" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+          echo "Published https://github.com/${GITHUB_REPOSITORY}/releases/tag/v1.1.0"

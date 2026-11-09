@@ -1,0 +1,18 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/sila-network/sila-core-primitives/keccak
+cpu: Apple M1 (Virtual)
+BenchmarkPermuteVariant/mem-3         	  619120	       430.9 ns/op	 315.63 MB/s
+BenchmarkPermuteVariant/mem-3         	  639594	       531.2 ns/op	 256.03 MB/s
+BenchmarkPermuteVariant/mem-3         	  516991	       472.5 ns/op	 287.86 MB/s
+BenchmarkPermuteVariant/mem-3         	  581166	       445.9 ns/op	 304.98 MB/s
+BenchmarkPermuteVariant/mem-3         	  614766	       475.7 ns/op	 285.87 MB/s
+BenchmarkPermuteVariant/mem-3         	  552984	       474.9 ns/op	 286.37 MB/s
+BenchmarkPermuteVariant/locals-3      	  799876	       373.3 ns/op	 364.28 MB/s
+BenchmarkPermuteVariant/locals-3      	  774870	       348.4 ns/op	 390.41 MB/s
+BenchmarkPermuteVariant/locals-3      	  674109	       393.5 ns/op	 345.65 MB/s
+BenchmarkPermuteVariant/locals-3      	  614131	       365.5 ns/op	 372.07 MB/s
+BenchmarkPermuteVariant/locals-3      	  455403	       485.3 ns/op	 280.27 MB/s
+BenchmarkPermuteVariant/locals-3      	  680888	       347.4 ns/op	 391.50 MB/s
+PASS
+ok  	github.com/sila-network/sila-core-primitives/keccak	3.967s

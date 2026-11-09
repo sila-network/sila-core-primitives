@@ -118,6 +118,28 @@ jobs:
       - name: loong64 (build and vet only; no emulator on the runner image)
         run: GOARCH=loong64 go vet ./... && GOARCH=loong64 go test -c -o /dev/null ./keccak && GOARCH=loong64 go test -c -o /dev/null ./secp256k1 && GOARCH=loong64 go test -c -o /dev/null ./txsig
 
+  timing:
+    name: secp256k1 timing evidence (informational) / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # Shared runners are noisy: this job records |t| values (dudect-style
+    # Welch test with a random-vs-random control) on real amd64 and arm64
+    # hardware, but cannot fail the workflow.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: false
+      - name: Welch t-test, tiny vs random secrets (100k samples, pinned core)
+        run: |
+          uname -m
+          SILA_TIMING_TEST=1 SILA_TIMING_SAMPLES=100000 taskset -c 0 go test -count=1 -timeout 60m -run ConstantTimeStatistical -v ./secp256k1 | grep -E 'timing_test|^(---|ok|FAIL)'
+
   independent-verification:
     name: Independent oracle (907 cases)
     runs-on: ubuntu-latest

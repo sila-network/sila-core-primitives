@@ -199,3 +199,27 @@ func TestLinearCombinationAgainstConstantTime(t *testing.T) {
 		}
 	}
 }
+
+func TestWNAFWidthLimits(t *testing.T) {
+	k := limbs{^uint64(0), ^uint64(0), ^uint64(0), 0x7fffffffffffffff}
+	for w := uint(2); w <= 8; w++ {
+		digits, _ := wnafVartime(&k, w)
+		sum := new(big.Int)
+		for i := len(digits) - 1; i >= 0; i-- {
+			sum.Lsh(sum, 1).Add(sum, big.NewInt(int64(digits[i])))
+		}
+		if sum.Cmp(limbsToBig(k)) != 0 {
+			t.Fatalf("width %d does not reconstruct", w)
+		}
+	}
+	for _, w := range []uint{0, 1, 9, 16} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("width %d accepted", w)
+				}
+			}()
+			wnafVartime(&k, w)
+		}()
+	}
+}

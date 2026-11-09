@@ -180,6 +180,10 @@ func jacToProjective(out *point, p *jacobian) {
 // at least w positions apart. top is the index of the highest non-zero
 // digit, or -1 for k = 0.
 func wnafVartime(k *limbs, w uint) (digits [257]int8, top int) {
+	if w < 2 || w > 8 {
+		// Digits are int8: |d| < 2^(w-1) must fit.
+		panic("sila/secp256k1: unsupported wNAF width")
+	}
 	x := [5]uint64{k[0], k[1], k[2], k[3], 0}
 	mask := uint64(1)<<w - 1
 	half := int64(1) << (w - 1)
@@ -275,7 +279,7 @@ func signedHalf(s *scalar) (limbs, bool) {
 }
 
 const (
-	glvWindowG = 8 // odd multiples 1..255 of G and λG
+	glvWindowG = 8 // odd multiples 1..255 of G and λG (8 is the int8 digit limit)
 	glvWindowQ = 5 // odd multiples 1..15 of the variable point
 )
 

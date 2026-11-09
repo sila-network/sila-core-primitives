@@ -74,13 +74,13 @@ func TestRejectMalformedPublicKeys(t *testing.T) {
 	generator := mustHex(generatorCompressed)
 	primeBytes := mustHex(primeHex)
 	cases := map[string][]byte{
-		"empty": nil,
-		"infinity": {0x00},
-		"short": generator[:32],
-		"long": append(bytes.Clone(generator), 0),
-		"hybrid": append([]byte{0x06}, mustHex(generatorUncompressed)[1:]...),
-		"wrong prefix": append([]byte{0x05}, generator[1:]...),
-		"x equals p": append([]byte{0x02}, primeBytes...),
+		"empty":                nil,
+		"infinity":             {0x00},
+		"short":                generator[:32],
+		"long":                 append(bytes.Clone(generator), 0),
+		"hybrid":               append([]byte{0x06}, mustHex(generatorUncompressed)[1:]...),
+		"wrong prefix":         append([]byte{0x05}, generator[1:]...),
+		"x equals p":           append([]byte{0x02}, primeBytes...),
 		"nonresidue at x zero": make([]byte, 33),
 	}
 	cases["nonresidue at x zero"][0] = 0x02

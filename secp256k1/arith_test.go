@@ -203,3 +203,53 @@ func TestScalarArithmeticAgainstBig(t *testing.T) {
 		}
 	}
 }
+
+func TestWideProductsAgainstBig(t *testing.T) {
+	rng := rand.New(rand.NewSource(13))
+	max := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+	vals := []*big.Int{big.NewInt(0), big.NewInt(1), max, new(big.Int).Sub(max, big.NewInt(1)), bigP, bigN}
+	for i := 0; i < 2000; i++ {
+		var b [32]byte
+		rng.Read(b[:])
+		vals = append(vals, new(big.Int).SetBytes(b[:]))
+	}
+	toWide := func(t *[8]uint64) *big.Int {
+		v := new(big.Int)
+		for i := 7; i >= 0; i-- {
+			v.Lsh(v, 64)
+			v.Or(v, new(big.Int).SetUint64(t[i]))
+		}
+		return v
+	}
+	for i, a := range vals {
+		b := vals[(i*7+3)%len(vals)]
+		xa, xb := limbsFromBytes(to32(a)), limbsFromBytes(to32(b))
+		var prod [8]uint64
+		mul256(&prod, &xa, &xb)
+		if toWide(&prod).Cmp(new(big.Int).Mul(a, b)) != 0 {
+			t.Fatalf("mul256(%x, %x)", a, b)
+		}
+		var s [8]uint64
+		sqr256(&s, &xa)
+		if toWide(&s).Cmp(new(big.Int).Mul(a, a)) != 0 {
+			t.Fatalf("sqr256(%x)", a)
+		}
+		// reduce512 on arbitrary 512-bit inputs (not only products).
+		var w [8]uint64
+		for j := range w {
+			w[j] = rng.Uint64()
+		}
+		if i%5 == 0 {
+			for j := range w {
+				w[j] = ^uint64(0)
+			}
+		}
+		var z limbs
+		reduce512(&z, &w)
+		var zb [32]byte
+		limbsToBytes(&zb, &z)
+		if fromBytes(zb).Cmp(new(big.Int).Mod(toWide(&w), bigP)) != 0 {
+			t.Fatalf("reduce512(%x)", toWide(&w))
+		}
+	}
+}

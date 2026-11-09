@@ -3,6 +3,8 @@
 
 package secp256k1
 
+import "math/bits"
+
 // Group arithmetic on secp256k1: y^2 = x^3 + 7 over GF(p).
 //
 // Points use homogeneous projective coordinates (X:Y:Z), x = X/Z,
@@ -252,4 +254,87 @@ func (r *point) scalarBaseMult(k *scalar) *point {
 	*r = acc
 	kc = limbs{}
 	return r
+}
+
+// ---------------------------------------------------------------------------
+// Variable-time helpers. These branch on, and index tables by, their scalar
+// inputs and are therefore restricted to PUBLIC values (signature
+// verification and public-key recovery). They are never called with a
+// private key or a nonce.
+
+// wnaf5 returns the width-5 non-adjacent form of the canonical value k,
+// least significant digit first: digits are 0 or odd in [-15, 15], and any
+// two non-zero digits are at least 5 positions apart.
+func wnaf5(k *limbs) [257]int8 {
+	var digits [257]int8
+	// x holds k with one extra limb of headroom for k + |d| carries.
+	x := [5]uint64{k[0], k[1], k[2], k[3], 0}
+	for i := 0; i < 257 && (x[0]|x[1]|x[2]|x[3]|x[4]) != 0; i++ {
+		if x[0]&1 == 1 {
+			d := int64(x[0] & 31)
+			if d >= 16 {
+				d -= 32
+			}
+			digits[i] = int8(d)
+			// x -= d
+			if d > 0 {
+				var b uint64
+				x[0], b = bits.Sub64(x[0], uint64(d), 0)
+				x[1], b = bits.Sub64(x[1], 0, b)
+				x[2], b = bits.Sub64(x[2], 0, b)
+				x[3], b = bits.Sub64(x[3], 0, b)
+				x[4], _ = bits.Sub64(x[4], 0, b)
+			} else {
+				var c uint64
+				x[0], c = bits.Add64(x[0], uint64(-d), 0)
+				x[1], c = bits.Add64(x[1], 0, c)
+				x[2], c = bits.Add64(x[2], 0, c)
+				x[3], c = bits.Add64(x[3], 0, c)
+				x[4], _ = bits.Add64(x[4], 0, c)
+			}
+		}
+		x[0] = x[0]>>1 | x[1]<<63
+		x[1] = x[1]>>1 | x[2]<<63
+		x[2] = x[2]>>1 | x[3]<<63
+		x[3] = x[3]>>1 | x[4]<<63
+		x[4] >>= 1
+	}
+	return digits
+}
+
+// linearCombinationVartime sets out = u1·G + u2·q for PUBLIC u1, u2, q.
+// u1·G uses the precomputed base table (no doublings); u2·q uses a
+// width-5 NAF with the odd multiples q, 3q, ..., 15q.
+func linearCombinationVartime(out *point, u1, u2 *scalar, q *point) {
+	var odd [8]point
+	odd[0] = *q
+	var q2 point
+	q2.double(q)
+	for i := 1; i < 8; i++ {
+		odd[i].add(&odd[i-1], &q2)
+	}
+	k2 := u2.canonical()
+	digits := wnaf5(&k2)
+	top := 256
+	for top >= 0 && digits[top] == 0 {
+		top--
+	}
+	var acc, neg point
+	acc.setIdentity()
+	for i := top; i >= 0; i-- {
+		acc.double(&acc)
+		if d := digits[i]; d > 0 {
+			acc.add(&acc, &odd[(d-1)/2])
+		} else if d < 0 {
+			neg.neg(&odd[(-d-1)/2])
+			acc.add(&acc, &neg)
+		}
+	}
+	k1 := u1.canonical()
+	for w := 0; w < 64; w++ {
+		if nib := window4(&k1, w); nib != 0 {
+			acc.add(&acc, &baseTable[w][nib])
+		}
+	}
+	*out = acc
 }

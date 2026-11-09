@@ -4,10 +4,8 @@
 package secp256k1
 
 import (
-	"crypto/hmac"
 	"crypto/sha256"
 	"errors"
-	"hash"
 )
 
 // SILA signature contract (development version; see
@@ -205,15 +203,28 @@ func Verify(pub PublicKey, digest [DigestSize]byte, sig Signature) bool {
 
 	q := pub.point()
 	var R point
-	linearCombination(&R, &u1, &u2, &q)
+	linearCombinationVartime(&R, &u1, &u2, &q)
 	if R.isIdentity() == 1 {
 		return false
 	}
-	x, _, _ := R.affine()
-	xb := x.bytes()
-	var xr scalar
-	xr.setBytesReduced(&xb)
-	return xr.equal(&r) == 1
+	// Accept iff x(R) mod n == r, i.e. x(R) is r or r + n (the latter only
+	// if r + n < p). With x(R) = X/Z this is checked as X == r·Z without a
+	// field inversion.
+	rb := sig.r
+	var rf, rz fieldElement
+	rf.setBytes(&rb) // r < n < p
+	if rz.mul(&rf, &R.z).equal(&R.x) == 1 {
+		return true
+	}
+	rl := limbsFromBytes(&rb)
+	rn, carry := addLimbs(&rl, &scalarN.m)
+	if carry != 0 || lessThan(&rn, &fieldP.m) != 1 {
+		return false
+	}
+	var rnb [32]byte
+	limbsToBytes(&rnb, &rn)
+	rf.setBytes(&rnb)
+	return rz.mul(&rf, &R.z).equal(&R.x) == 1
 }
 
 // RecoverPublicKey returns the public key that produced sig over digest,
@@ -254,71 +265,43 @@ func RecoverPublicKey(digest [DigestSize]byte, sig Signature) (PublicKey, error)
 	u1.neg(&u1)
 	u2.mul(&s, &rinv)
 	var Q point
-	linearCombination(&Q, &u1, &u2, &R)
+	linearCombinationVartime(&Q, &u1, &u2, &R)
 	return publicKeyFromPoint(&Q)
-}
-
-// linearCombination sets out = u1·G + u2·Q. Used only on public values
-// (verification and recovery).
-func linearCombination(out *point, u1, u2 *scalar, q *point) {
-	var a, b point
-	a.scalarBaseMult(u1)
-	b.scalarMult(u2, q)
-	out.add(&a, &b)
 }
 
 // rfc6979 generates nonce candidates per RFC 6979 §3.2 with HMAC-SHA-256
 // for a 256-bit group order: qlen = hlen = 256, so bits2int is the identity
-// and bits2octets(h) = int(h) mod n.
+// and bits2octets(h) = int(h) mod n. HMAC is computed on fixed-size stack
+// buffers (hmacSHA256) so that the key-derived state can be wiped.
 type rfc6979 struct {
 	k, v [32]byte
-	mac  hash.Hash
 	more bool
 }
 
-func newRFC6979(d, z *scalar) *rfc6979 {
-	g := &rfc6979{}
+func newRFC6979(d, z *scalar) rfc6979 {
+	var g rfc6979
 	for i := range g.v {
 		g.v[i] = 0x01
 	}
-	x := d.bytes()  // int2octets(d)
-	h1 := z.bytes() // bits2octets(digest) = digest mod n
-	defer clear(x[:])
-	g.update(0x00, x[:], h1[:])
-	g.update(0x01, x[:], h1[:])
+	x := d.bytes()                                            // int2octets(d)
+	h1 := z.bytes()                                           // bits2octets(digest) = digest mod n
+	g.k = hmacSHA256(&g.k, g.v[:], []byte{0x00}, x[:], h1[:]) // step d
+	g.v = hmacSHA256(&g.k, g.v[:])                            // step e
+	g.k = hmacSHA256(&g.k, g.v[:], []byte{0x01}, x[:], h1[:]) // step f
+	g.v = hmacSHA256(&g.k, g.v[:])                            // step g
+	clear(x[:])
 	return g
-}
-
-// update performs K = HMAC_K(V || sep || x || h1); V = HMAC_K(V).
-func (g *rfc6979) update(sep byte, x, h1 []byte) {
-	mac := hmac.New(sha256.New, g.k[:])
-	mac.Write(g.v[:])
-	mac.Write([]byte{sep})
-	mac.Write(x)
-	mac.Write(h1)
-	mac.Sum(g.k[:0])
-	mac = hmac.New(sha256.New, g.k[:])
-	mac.Write(g.v[:])
-	mac.Sum(g.v[:0])
 }
 
 // next writes the next candidate into k and reports whether it lies in
 // [1, n-1]. After each candidate the state advances per RFC 6979 §3.2 h.3.
 func (g *rfc6979) next(k *scalar) bool {
 	if g.more {
-		// K = HMAC_K(V || 0x00); V = HMAC_K(V)
-		mac := hmac.New(sha256.New, g.k[:])
-		mac.Write(g.v[:])
-		mac.Write([]byte{0x00})
-		mac.Sum(g.k[:0])
-		mac = hmac.New(sha256.New, g.k[:])
-		mac.Write(g.v[:])
-		mac.Sum(g.v[:0])
+		g.k = hmacSHA256(&g.k, g.v[:], []byte{0x00})
+		g.v = hmacSHA256(&g.k, g.v[:])
 	}
 	g.more = true
-	mac := hmac.New(sha256.New, g.k[:])
-	mac.Write(g.v[:])
-	mac.Sum(g.v[:0])
+	g.v = hmacSHA256(&g.k, g.v[:])
 	ok := k.setBytesCanonical(&g.v) & (1 ^ k.isZero())
 	return ok == 1
 }
@@ -326,4 +309,40 @@ func (g *rfc6979) next(k *scalar) bool {
 func (g *rfc6979) wipe() {
 	clear(g.k[:])
 	clear(g.v[:])
+}
+
+// hmacSHA256 computes HMAC-SHA-256 (RFC 2104) with a 32-byte key over the
+// concatenation of parts (at most 97 bytes in total, which covers every
+// RFC 6979 message here). All buffers are on the stack and are cleared.
+func hmacSHA256(key *[32]byte, parts ...[]byte) [32]byte {
+	const block = 64
+	var buf [block + 97]byte
+	defer clear(buf[:])
+	n := block
+	for _, p := range parts {
+		if n+len(p) > len(buf) {
+			panic("sila/secp256k1: hmac message too long")
+		}
+		n += copy(buf[n:], p)
+	}
+	for i := 0; i < block; i++ {
+		var kb byte
+		if i < len(key) {
+			kb = key[i]
+		}
+		buf[i] = kb ^ 0x36
+	}
+	inner := sha256.Sum256(buf[:n])
+	var outer [block + 32]byte
+	defer clear(outer[:])
+	for i := 0; i < block; i++ {
+		var kb byte
+		if i < len(key) {
+			kb = key[i]
+		}
+		outer[i] = kb ^ 0x5c
+	}
+	copy(outer[block:], inner[:])
+	clear(inner[:])
+	return sha256.Sum256(outer[:])
 }

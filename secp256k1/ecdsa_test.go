@@ -5,6 +5,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/sha256"
 	"errors"
 	"math/big"
@@ -370,5 +371,31 @@ func TestRecoveryWithOverflowedR(t *testing.T) {
 	sig, _ := ParseRecoverableSignature(b)
 	if _, err := RecoverPublicKey([32]byte{}, sig); !errors.Is(err, ErrRecoveryFailed) {
 		t.Fatal("x = r + n >= p accepted")
+	}
+}
+
+func TestHMACSHA256MatchesStandardLibrary(t *testing.T) {
+	rng := rand.New(rand.NewSource(15))
+	for i := 0; i < 500; i++ {
+		var key [32]byte
+		rng.Read(key[:])
+		msg := make([]byte, rng.Intn(98))
+		rng.Read(msg)
+		cut := rng.Intn(len(msg) + 1)
+		got := hmacSHA256(&key, msg[:cut], msg[cut:])
+		m := hmac.New(sha256.New, key[:])
+		m.Write(msg)
+		if !bytes.Equal(got[:], m.Sum(nil)) {
+			t.Fatalf("hmac mismatch for %d-byte message", len(msg))
+		}
+	}
+}
+
+func TestSignDoesNotAllocate(t *testing.T) {
+	rng := rand.New(rand.NewSource(16))
+	priv := testKey(t, rng)
+	digest := sha256.Sum256([]byte("alloc"))
+	if n := testing.AllocsPerRun(20, func() { Sign(priv, digest) }); n != 0 {
+		t.Fatalf("Sign allocates %v times", n)
 	}
 }

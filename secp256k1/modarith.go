@@ -168,14 +168,24 @@ func (md *modulus) fromMont(z, x *limbs) {
 
 // expPublic sets z = x^e (Montgomery form) for a PUBLIC exponent e given
 // as big-endian bytes. Branches depend only on the bits of e, never on x.
+// It uses fixed 4-bit windows: the table index is a nibble of the public
+// exponent, so plain indexing does not leak anything about x.
 func (md *modulus) expPublic(z, x *limbs, e *[32]byte) {
+	var table [16]limbs
+	table[0] = md.one
+	table[1] = *x
+	for i := 2; i < 16; i++ {
+		md.mul(&table[i], &table[i-1], x)
+	}
 	acc := md.one
-	base := *x
 	for _, byt := range e {
-		for bit := 7; bit >= 0; bit-- {
+		for _, nib := range [2]byte{byt >> 4, byt & 0xF} {
 			md.mul(&acc, &acc, &acc)
-			if byt>>uint(bit)&1 == 1 {
-				md.mul(&acc, &acc, &base)
+			md.mul(&acc, &acc, &acc)
+			md.mul(&acc, &acc, &acc)
+			md.mul(&acc, &acc, &acc)
+			if nib != 0 {
+				md.mul(&acc, &acc, &table[nib])
 			}
 		}
 	}

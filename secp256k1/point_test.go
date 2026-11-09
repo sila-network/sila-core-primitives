@@ -187,3 +187,51 @@ func TestRandomAdditionsAgainstReference(t *testing.T) {
 		}
 	}
 }
+
+func TestWNAFAndVartimeCombination(t *testing.T) {
+	rng := rand.New(rand.NewSource(14))
+	ks := interesting(rng, bigN, 200)
+	for _, k := range ks {
+		kl := limbsFromBytes(to32(k))
+		digits := wnaf5(&kl)
+		// Reconstruct k = Σ d_i·2^i and check the NAF properties.
+		sum := new(big.Int)
+		last := -10
+		for i := len(digits) - 1; i >= 0; i-- {
+			sum.Lsh(sum, 1)
+			sum.Add(sum, big.NewInt(int64(digits[i])))
+		}
+		for i, d := range digits {
+			if d == 0 {
+				continue
+			}
+			if d%2 == 0 || d > 15 || d < -15 || i-last < 5 {
+				t.Fatalf("bad wNAF digit %d at %d for %x", d, i, k)
+			}
+			last = i
+		}
+		if sum.Cmp(k) != 0 {
+			t.Fatalf("wNAF of %x reconstructs to %x", k, sum)
+		}
+	}
+	refQ := refMul(big.NewInt(11), refG)
+	q := fromRef(refQ)
+	for i := 0; i+1 < len(ks); i += 2 {
+		u1, u2 := scalarFromBig(ks[i]), scalarFromBig(ks[i+1])
+		var got point
+		linearCombinationVartime(&got, &u1, &u2, &q)
+		want := refAdd(refMul(ks[i], refG), refMul(ks[i+1], refQ))
+		if !refEqual(toRef(&got), want) {
+			t.Fatalf("u1·G + u2·Q mismatch for %x, %x", ks[i], ks[i+1])
+		}
+	}
+	// u1·G + u2·Q = identity when u2·Q = -u1·G.
+	var u1, u2 scalar
+	u1.setBytesCanonical(to32(big.NewInt(5)))
+	u2.setBytesCanonical(to32(new(big.Int).Sub(bigN, big.NewInt(5))))
+	var got point
+	linearCombinationVartime(&got, &u1, &u2, &generator)
+	if got.isIdentity() != 1 {
+		t.Fatal("5G + (n-5)G != identity")
+	}
+}

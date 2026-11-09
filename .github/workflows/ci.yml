@@ -73,8 +73,11 @@ jobs:
       - name: Short fuzz
         run: go test -run '^$' -fuzz FuzzSum256 -fuzztime 30s ./keccak
 
-      - name: Short fuzz (secp256k1 public-key parser)
-        run: go test -run '^$' -fuzz FuzzPublicKeyRoundTrip -fuzztime 10s ./secp256k1
+      - name: Short fuzz (secp256k1)
+        run: |
+          for f in FuzzPublicKeyRoundTrip FuzzParseAndVerifySignature FuzzSignVerifyRecover; do
+            go test -run '^$' -fuzz "^${f}\$" -fuzztime 15s ./secp256k1
+          done
 
   cross-arch:
     name: Other architectures (386 native; s390x big-endian, ppc64le, riscv64 under QEMU)
@@ -96,12 +99,14 @@ jobs:
           for arch in s390x ppc64le riscv64; do
             echo "== $arch"
             GOARCH=$arch go vet ./...
-            GOARCH=$arch go test -c -o "$RUNNER_TEMP/keccak.$arch" ./keccak
             emu=$(command -v "qemu-$arch" || command -v "qemu-$arch-static")
-            (cd keccak && "$emu" "$RUNNER_TEMP/keccak.$arch" -test.short -test.count=1 -test.v | grep -E '^(--- |PASS|FAIL|ok)')
+            for pkg in keccak secp256k1; do
+              GOARCH=$arch go test -c -o "$RUNNER_TEMP/$pkg.$arch" "./$pkg"
+              (cd "$pkg" && "$emu" "$RUNNER_TEMP/$pkg.$arch" -test.short -test.count=1 -test.v | grep -E '^(--- |PASS|FAIL|ok)')
+            done
           done
       - name: loong64 (build and vet only; no emulator on the runner image)
-        run: GOARCH=loong64 go vet ./... && GOARCH=loong64 go test -c -o /dev/null ./keccak
+        run: GOARCH=loong64 go vet ./... && GOARCH=loong64 go test -c -o /dev/null ./keccak && GOARCH=loong64 go test -c -o /dev/null ./secp256k1
 
   independent-verification:
     name: Independent oracle (907 cases)
@@ -127,7 +132,7 @@ jobs:
         run: python -I scripts/verify_independent.py "$RUNNER_TEMP/sila-keccak256-purego"
 
   geth-equivalence:
-    name: Equivalence with go-ethereum v1.17.10
+    name: Equivalence with go-ethereum v1.17.10 (Keccak; secp256k1 vs libsecp256k1 and decred)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -146,5 +151,7 @@ jobs:
           go test -count=1 -run 'TestSameOutput|TestRandomAgainstGeth|TestDispatchReport' -v . | grep -E 'enabled|^(ok|FAIL|---)'
           go test -count=1 -run 'TestSameOutput|TestRandomAgainstGeth' . -args -sila.noavx512
           go test -count=1 -tags purego -run 'TestSameOutput|TestRandomAgainstGeth' .
+      - name: secp256k1 differential (libsecp256k1 via cgo, decred v4)
+        run: go test -count=1 -run 'Secp256k1' -v . | grep -E '^(ok|FAIL|---)'
       # Performance is measured on dedicated hardware with run.sh, not on
       # shared CI runners whose timings are not comparable.

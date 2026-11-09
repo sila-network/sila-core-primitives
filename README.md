@@ -128,6 +128,14 @@ checks), GitHub CodeQL analysis, investigation of any security alerts, and
 explicit approval by the project owner. Additional SILA development may
 proceed without waiting for a human auditor; merge is never automatic.
 
+For **production use within SILA**, the release-candidate checklist in
+`SECURITY.md` specifies the remaining concrete gates: release-commit CI and
+CodeQL results, reviewed alerts, specified supported CPUs and the SILA
+protocol's serialization/domain-separation and end-to-end consensus tests,
+confidential vulnerability reporting, and an explicit signed-off release
+from Ahmed Ibrahim. Passing these requirements permits an informed release
+decision; it does not certify the entire blockchain as secure.
+
 For **production**, use the separate security criteria in `SECURITY.md`:
 threat-model and integration review, supported-platform validation, a
 confidential vulnerability-reporting channel, resolution of critical findings,

@@ -41,6 +41,33 @@ are security signals, not a formal proof of cryptographic or assembly
 correctness. Current code must remain labeled **not approved for production**
 until the separate production gates are satisfied.
 
+## SILA production release candidate checklist
+
+The target is **use as the Keccak-256 primitive inside the real SILA network**,
+not merely a demonstration. This is a release checklist, not a claim that
+cryptographic software can be proven free of bugs.
+
+| Gate | Required evidence | Current status |
+|---|---|---|
+| Algorithm correctness | Official Keccak known-answer vectors, independent oracle, differential tests with go-ethereum, streaming/chunking tests | Verified in CI for PR #1; re-check on release commit |
+| CPU safety and portability | Tests for AVX-512 selection/disable flags, fallback, bounded preemption, assembly memory and register rules; runtime tests on the CPU/OS combinations to be supported | Tested in CI on available runners; the production target inventory still needs definition |
+| Static analysis | CodeQL for Go, Python and Actions, with open alerts reviewed individually | CodeQL workflow passed on PR head `6062a908`; alert-triage decision still required |
+| Quality and reproducibility | Go version matrix, race detector, fuzz tests, deterministic generated files, reproducible build inputs | Verified in CI for PR #1; re-check on the exact release commit |
+| Deployment integration | Consumers use the exact Keccak-256 variant and a specified serialization/domain-separation scheme, with end-to-end network and consensus test vectors | Pending: no SILA production network integration is included in this repository |
+| Vulnerability response | Confirmed confidential reporting channel, maintainer and response policy | Pending administrator configuration |
+| Owner release approval | Approved release commit, signed-off residual risks, tagged release, reproducible release notes and rollback process | Pending Ahmed Ibrahim's explicit sign-off |
+
+**Release decision:** the owner may choose an automated-review-first
+security assurance model with documented residual risk. An external human
+security audit is strongly recommended for cryptographic code that will
+secure assets, but is not defined here as an unconditional prerequisite.
+CodeQL, fuzzing and independent reference comparisons cannot establish
+absolute safety or certify that the entire SILA blockchain is secure.
+
+**Do not** merge or tag a production release merely because all workflow
+jobs are green. Record the exact commit, target platforms, code scanning
+alert disposition, integration evidence and owner's authorization first.
+
 ## Supported versions
 
 | Version | Supported |

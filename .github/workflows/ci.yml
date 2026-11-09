@@ -150,6 +150,8 @@ jobs:
       - name: Welch t-test, tiny vs random secrets with random-vs-random controls (100k samples, 5 runs, pinned core)
         run: |
           uname -m
+          go version
+          grep -o -w -m1 dit /proc/cpuinfo && echo "FEAT_DIT available (used by Sign and PublicKey with Go >= 1.24)" || echo "no FEAT_DIT flag"
           SILA_TIMING_TEST=1 SILA_TIMING_SAMPLES=100000 SILA_TIMING_REPS=5 taskset -c 0 go test -count=1 -timeout 60m -run ConstantTimeStatistical -v ./secp256k1 | grep -E 'timing_test|^(---|ok|FAIL)'
 
   independent-verification:

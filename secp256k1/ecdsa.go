@@ -224,6 +224,15 @@ func sign(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropySize]b
 	if priv == nil || !priv.valid {
 		return Signature{}, ErrInvalidPrivateKey
 	}
+	// All secret-dependent work runs in the processor's data-independent-
+	// timing mode where available (withDIT).
+	var sig Signature
+	withDIT(func() { sig = signSecret(priv, digest, extra) })
+	return sig, nil
+}
+
+// signSecret computes the signature; priv is valid.
+func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropySize]byte) Signature {
 	var z scalar
 	z.setBytesReduced(digest)
 
@@ -237,7 +246,7 @@ func sign(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropySize]b
 		sig, ok := signWithNonce(&priv.d, &z, &k)
 		k.zero()
 		if ok {
-			return sig, nil
+			return sig
 		}
 	}
 }

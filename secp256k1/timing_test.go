@@ -58,9 +58,50 @@ func crop(x []float64, keep float64) []float64 {
 	return out
 }
 
-func measureClasses(t *testing.T, samples int, classA, classB func(i int) func()) float64 {
+// measureClassesSigned returns the Welch t statistic with the largest
+// magnitude over the cropping levels, keeping its sign (a's mean minus b's).
+func measureClassesSigned(samples int, classA, classB func(i int) func()) float64 {
+	a, b := sampleClasses(samples, classA, classB)
+	best := 0.0
+	for _, keep := range []float64{0.5, 0.75, 0.9} {
+		tv := welchT(crop(a, keep), crop(b, keep))
+		if math.Abs(tv) > math.Abs(best) {
+			best = tv
+		}
+	}
+	return best
+}
+
+func minAbs(ts []float64) float64 {
+	m := math.Inf(1)
+	for _, v := range ts {
+		m = math.Min(m, math.Abs(v))
+	}
+	return m
+}
+
+func sameSigns(ts []float64) bool {
+	for _, v := range ts {
+		if (v > 0) != (ts[0] > 0) {
+			return false
+		}
+	}
+	return true
+}
+
+func fmtTs(ts []float64) string {
+	out := "["
+	for i, v := range ts {
+		if i > 0 {
+			out += " "
+		}
+		out += strconv.FormatFloat(v, 'f', 2, 64)
+	}
+	return out + "]"
+}
+
+func sampleClasses(samples int, classA, classB func(i int) func()) (a, b []float64) {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	var a, b []float64
 	for i := 0; i < samples; i++ {
 		useA := rng.Intn(2) == 0
 		var f func()
@@ -78,14 +119,7 @@ func measureClasses(t *testing.T, samples int, classA, classB func(i int) func()
 			b = append(b, d)
 		}
 	}
-	worst := 0.0
-	for _, keep := range []float64{0.5, 0.75, 0.9} {
-		tv := math.Abs(welchT(crop(a, keep), crop(b, keep)))
-		if tv > worst {
-			worst = tv
-		}
-	}
-	return worst
+	return a, b
 }
 
 func TestConstantTimeStatistical(t *testing.T) {
@@ -96,75 +130,53 @@ func TestConstantTimeStatistical(t *testing.T) {
 	if v, err := strconv.Atoi(os.Getenv("SILA_TIMING_SAMPLES")); err == nil && v > 0 {
 		samples = v
 	}
-	rng := rand.New(rand.NewSource(17))
-
-	// Class A: tiny secrets (1..255, mostly zero bits and windows).
-	// Class B: uniformly random full-size secrets.
-	small := make([]scalar, 256)
-	random := make([]scalar, 256)
-	random2 := make([]scalar, 256) // control class: also uniformly random
-	keysSmall := make([]*PrivateKey, 256)
-	keysRandom := make([]*PrivateKey, 256)
-	keysRandom2 := make([]*PrivateKey, 256)
-	for i := range small {
-		small[i] = scalarFromBig(big.NewInt(int64(i%255 + 1)))
-		var buf [32]byte
-		rng.Read(buf[:])
-		random[i] = scalarFromBig(new(big.Int).SetBytes(buf[:]))
-		rng.Read(buf[:])
-		random2[i] = scalarFromBig(new(big.Int).SetBytes(buf[:]))
-		keysSmall[i] = &PrivateKey{d: small[i], valid: true}
-		keysRandom[i] = &PrivateKey{d: random[i], valid: true}
-		keysRandom2[i] = &PrivateKey{d: random2[i], valid: true}
-	}
-	var sink point
-	var sinkS scalar
-	digest := [32]byte{7}
-	// Each check compares tiny secrets (a) with random secrets (b); its
-	// control compares a second random set (c) with b, the same code with
-	// the same cost, so the control's |t| values show this machine's noise
-	// for that operation.
-	checks := []struct {
-		name    string
-		a, b, c func(i int) func()
-	}{
-		{"scalarBaseMult",
-			func(i int) func() { return func() { sink.scalarBaseMult(&small[i%256]) } },
-			func(i int) func() { return func() { sink.scalarBaseMult(&random[i%256]) } },
-			func(i int) func() { return func() { sink.scalarBaseMult(&random2[i%256]) } }},
-		{"scalarMult",
-			func(i int) func() { return func() { sink.scalarMult(&small[i%256], &generator) } },
-			func(i int) func() { return func() { sink.scalarMult(&random[i%256], &generator) } },
-			func(i int) func() { return func() { sink.scalarMult(&random2[i%256], &generator) } }},
-		{"scalar inverse",
-			func(i int) func() { return func() { sinkS.inv(&small[i%256]) } },
-			func(i int) func() { return func() { sinkS.inv(&random[i%256]) } },
-			func(i int) func() { return func() { sinkS.inv(&random2[i%256]) } }},
-		{"Sign",
-			func(i int) func() { return func() { Sign(keysSmall[i%256], digest) } },
-			func(i int) func() { return func() { Sign(keysRandom[i%256], digest) } },
-			func(i int) func() { return func() { Sign(keysRandom2[i%256], digest) } }},
-	}
-	// A real data-dependent timing difference shows up in every
-	// repetition; scheduler and frequency noise on a shared machine does
-	// not. So a leak is reported only if all repetitions exceed the bound.
 	reps := 3
 	if v, err := strconv.Atoi(os.Getenv("SILA_TIMING_REPS")); err == nil && v > 0 {
 		reps = v
 	}
-	for _, c := range checks {
-		minT, maxT := math.Inf(1), 0.0
-		minC, maxC := math.Inf(1), 0.0
+
+	// Every call reads its secret from the same fixed variable (in, key),
+	// so all classes use the same memory addresses: only the secret value
+	// differs. Fresh secret sets are drawn for every repetition.
+	var in scalar
+	key := &PrivateKey{valid: true}
+	var sink point
+	var sinkS scalar
+	digest := [32]byte{7}
+	ops := []struct {
+		name string
+		run  func(k *scalar)
+	}{
+		{"scalarBaseMult", func(k *scalar) { in = *k; sink.scalarBaseMult(&in) }},
+		{"scalarMult", func(k *scalar) { in = *k; sink.scalarMult(&in, &generator) }},
+		{"scalar inverse", func(k *scalar) { in = *k; sinkS.inv(&in) }},
+		{"Sign", func(k *scalar) { key.d = *k; Sign(key, digest) }},
+	}
+	seed := time.Now().UnixNano()
+	for _, op := range ops {
+		var ts, cs []float64
 		for r := 0; r < reps; r++ {
-			tv := measureClasses(t, samples, c.a, c.b)
-			minT, maxT = math.Min(minT, tv), math.Max(maxT, tv)
-			cv := measureClasses(t, samples, c.c, c.b)
-			minC, maxC = math.Min(minC, cv), math.Max(maxC, cv)
+			rng := rand.New(rand.NewSource(seed + int64(r)))
+			// a: tiny secrets (1..255); b, c: uniformly random secrets.
+			a, b, c := make([]scalar, 256), make([]scalar, 256), make([]scalar, 256)
+			for i := range a {
+				a[i] = scalarFromBig(big.NewInt(int64(rng.Intn(255) + 1)))
+				var buf [32]byte
+				rng.Read(buf[:])
+				b[i] = scalarFromBig(new(big.Int).SetBytes(buf[:]))
+				rng.Read(buf[:])
+				c[i] = scalarFromBig(new(big.Int).SetBytes(buf[:]))
+			}
+			class := func(set []scalar) func(i int) func() {
+				return func(i int) func() { return func() { op.run(&set[i%256]) } }
+			}
+			ts = append(ts, measureClassesSigned(samples, class(a), class(b)))
+			cs = append(cs, measureClassesSigned(samples, class(c), class(b)))
 		}
-		t.Logf("%-15s |t| min %.2f max %.2f; control min %.2f max %.2f; %d runs (bound 4.5)",
-			c.name, minT, maxT, minC, maxC, reps)
-		if minT > 4.5 {
-			t.Errorf("%s: consistent timing difference between secret classes, min |t| = %.2f (control max %.2f)", c.name, minT, maxC)
+		minT, sameSign := minAbs(ts), sameSigns(ts)
+		t.Logf("%-15s t %s; control t %s (bound 4.5, %d runs)", op.name, fmtTs(ts), fmtTs(cs), reps)
+		if minT > 4.5 && sameSign {
+			t.Errorf("%s: consistent timing difference between secret classes, min |t| = %.2f (control %s)", op.name, minT, fmtTs(cs))
 		}
 	}
 	_ = sink

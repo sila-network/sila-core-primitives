@@ -80,9 +80,14 @@ func (k *PrivateKey) PublicKey() (PublicKey, error) {
 	if k == nil || !k.valid {
 		return PublicKey{}, ErrInvalidPrivateKey
 	}
-	var p point
-	p.scalarBaseMult(&k.d)
-	return publicKeyFromPoint(&p)
+	var pub PublicKey
+	var err error
+	withDIT(func() {
+		var p point
+		p.scalarBaseMult(&k.d)
+		pub, err = publicKeyFromPoint(&p)
+	})
+	return pub, err
 }
 
 // Zero overwrites the key; it becomes invalid.

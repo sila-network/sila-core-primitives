@@ -56,6 +56,12 @@ Constant-time techniques:
 - Signed radix-32 digits (Booth recoding), computed with masks; every
   table lookup scans all 16 entries; the sign is applied with a
   constant-time negation and select.
+- Processor support: on arm64, Arm guarantees data-independent timing of
+  multiplications and other instructions only while PSTATE.DIT is set.
+  With Go ≥ 1.24, `Sign`, the hedged variants and `PrivateKey.PublicKey`
+  run their secret-dependent work inside
+  `crypto/subtle.WithDataIndependentTiming`, which sets DIT on processors
+  with FEAT_DIT (no effect elsewhere; Go 1.23 builds run without it).
 - The variable-time code (Jacobian formulas with explicit special cases,
   GLV split, wNAF) is confined to `vartime.go` and is reachable only from
   Verify and RecoverPublicKey, whose inputs are all public.

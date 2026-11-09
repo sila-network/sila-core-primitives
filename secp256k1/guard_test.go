@@ -21,7 +21,7 @@ import (
 // allow-list. math/big may appear only in _test.go files as an oracle.
 func TestNoVariableTimeImports(t *testing.T) {
 	allowed := map[string]bool{
-		"crypto/hmac": true, "crypto/rand": true, "crypto/sha256": true,
+		"crypto/hmac": true, "crypto/rand": true, "crypto/sha256": true, "crypto/subtle": true,
 		"errors": true, "hash": true, "io": true, "math/bits": true,
 	}
 	files, err := filepath.Glob("*.go")

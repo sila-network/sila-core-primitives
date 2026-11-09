@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — secp256k1 (development, `dev/secp256k1-v0.1`)
+
+Second core primitive; not released. See `secp256k1/README.md`.
+
+- Constant-time field, scalar and group arithmetic (no `math/big`):
+  special-form reduction for p, Montgomery arithmetic for n, complete
+  addition formulas, fixed-window scalar multiplication with full-table
+  scans, precomputed base table.
+- Private keys, RFC 6979 deterministic low-S ECDSA, strict verification,
+  public-key recovery (v in 0..3), strict 64/65-byte codecs.
+- Verification: math/big and affine references; byte-identical
+  signatures with libsecp256k1 (and decred for digests < n); verdicts
+  identical to libsecp256k1; Wycheproof (464/464 "bitcoin"); fuzzing;
+  multi-architecture runs (amd64, arm64, 386, s390x, ppc64le, riscv64).
+- Signing performs no heap allocation; opt-in statistical timing test.
+- Proposed signature contract with OPEN protocol decisions:
+  `docs/SECP256K1-SIGNATURE-CONTRACT.md`.
+
 ## V1.1 — review round 2 (2026-11-08)
 
 - Ownership: `NOTICE` now reads "Copyright 2026 Ahmed Ibrahim", replacing

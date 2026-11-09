@@ -5,6 +5,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"math/rand"
@@ -141,4 +142,47 @@ func FuzzSignVerifyRecover(f *testing.F) {
 			t.Fatal("signature valid for a different digest")
 		}
 	})
+}
+
+// Variable-time helpers may only be called from the public-input entry
+// points Verify and RecoverPublicKey (and from each other). This static
+// check stops a future change from routing a secret (a private key or a
+// nonce) through them.
+func TestVariableTimeHelpersOnlyOnPublicPaths(t *testing.T) {
+	vartime := map[string]bool{"linearCombinationVartime": true, "wnaf5": true}
+	allowedCallers := map[string]bool{"Verify": true, "RecoverPublicKey": true, "linearCombinationVartime": true}
+	files, _ := filepath.Glob("*.go")
+	calls := 0
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		af, err := parser.ParseFile(fset, f, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range af.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if id, ok := call.Fun.(*ast.Ident); ok && vartime[id.Name] {
+					calls++
+					if !allowedCallers[fn.Name.Name] {
+						t.Errorf("%s: %s calls variable-time %s", fset.Position(call.Pos()), fn.Name.Name, id.Name)
+					}
+				}
+				return true
+			})
+		}
+	}
+	if calls < 3 {
+		t.Fatalf("expected at least 3 call sites, found %d", calls)
+	}
 }

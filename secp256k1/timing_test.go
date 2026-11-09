@@ -105,6 +105,7 @@ func TestConstantTimeStatistical(t *testing.T) {
 	random2 := make([]scalar, 256) // control class: also uniformly random
 	keysSmall := make([]*PrivateKey, 256)
 	keysRandom := make([]*PrivateKey, 256)
+	keysRandom2 := make([]*PrivateKey, 256)
 	for i := range small {
 		small[i] = scalarFromBig(big.NewInt(int64(i%255 + 1)))
 		var buf [32]byte
@@ -114,46 +115,56 @@ func TestConstantTimeStatistical(t *testing.T) {
 		random2[i] = scalarFromBig(new(big.Int).SetBytes(buf[:]))
 		keysSmall[i] = &PrivateKey{d: small[i], valid: true}
 		keysRandom[i] = &PrivateKey{d: random[i], valid: true}
+		keysRandom2[i] = &PrivateKey{d: random2[i], valid: true}
 	}
 	var sink point
 	var sinkS scalar
 	digest := [32]byte{7}
+	// Each check compares tiny secrets (a) with random secrets (b); its
+	// control compares a second random set (c) with b, the same code with
+	// the same cost, so the control's |t| values show this machine's noise
+	// for that operation.
 	checks := []struct {
-		name string
-		a, b func(i int) func()
+		name    string
+		a, b, c func(i int) func()
 	}{
 		{"scalarBaseMult",
 			func(i int) func() { return func() { sink.scalarBaseMult(&small[i%256]) } },
-			func(i int) func() { return func() { sink.scalarBaseMult(&random[i%256]) } }},
-		// Control: two random classes. It must not show a difference; its
-		// |t| values show this machine's noise level.
-		{"control (rand)",
-			func(i int) func() { return func() { sink.scalarBaseMult(&random2[i%256]) } },
-			func(i int) func() { return func() { sink.scalarBaseMult(&random[i%256]) } }},
+			func(i int) func() { return func() { sink.scalarBaseMult(&random[i%256]) } },
+			func(i int) func() { return func() { sink.scalarBaseMult(&random2[i%256]) } }},
 		{"scalarMult",
 			func(i int) func() { return func() { sink.scalarMult(&small[i%256], &generator) } },
-			func(i int) func() { return func() { sink.scalarMult(&random[i%256], &generator) } }},
+			func(i int) func() { return func() { sink.scalarMult(&random[i%256], &generator) } },
+			func(i int) func() { return func() { sink.scalarMult(&random2[i%256], &generator) } }},
 		{"scalar inverse",
 			func(i int) func() { return func() { sinkS.inv(&small[i%256]) } },
-			func(i int) func() { return func() { sinkS.inv(&random[i%256]) } }},
+			func(i int) func() { return func() { sinkS.inv(&random[i%256]) } },
+			func(i int) func() { return func() { sinkS.inv(&random2[i%256]) } }},
 		{"Sign",
 			func(i int) func() { return func() { Sign(keysSmall[i%256], digest) } },
-			func(i int) func() { return func() { Sign(keysRandom[i%256], digest) } }},
+			func(i int) func() { return func() { Sign(keysRandom[i%256], digest) } },
+			func(i int) func() { return func() { Sign(keysRandom2[i%256], digest) } }},
 	}
 	// A real data-dependent timing difference shows up in every
 	// repetition; scheduler and frequency noise on a shared machine does
-	// not (a random-vs-random control reached |t| = 3.6 here). So a leak
-	// is reported only if all repetitions exceed the bound.
-	const reps = 3
+	// not. So a leak is reported only if all repetitions exceed the bound.
+	reps := 3
+	if v, err := strconv.Atoi(os.Getenv("SILA_TIMING_REPS")); err == nil && v > 0 {
+		reps = v
+	}
 	for _, c := range checks {
 		minT, maxT := math.Inf(1), 0.0
+		minC, maxC := math.Inf(1), 0.0
 		for r := 0; r < reps; r++ {
 			tv := measureClasses(t, samples, c.a, c.b)
 			minT, maxT = math.Min(minT, tv), math.Max(maxT, tv)
+			cv := measureClasses(t, samples, c.c, c.b)
+			minC, maxC = math.Min(minC, cv), math.Max(maxC, cv)
 		}
-		t.Logf("%-15s |t| min %.2f max %.2f over %d runs (bound 4.5)", c.name, minT, maxT, reps)
+		t.Logf("%-15s |t| min %.2f max %.2f; control min %.2f max %.2f; %d runs (bound 4.5)",
+			c.name, minT, maxT, minC, maxC, reps)
 		if minT > 4.5 {
-			t.Errorf("%s: consistent timing difference between secret classes, min |t| = %.2f", c.name, minT)
+			t.Errorf("%s: consistent timing difference between secret classes, min |t| = %.2f (control max %.2f)", c.name, minT, maxC)
 		}
 	}
 	_ = sink

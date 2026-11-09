@@ -147,10 +147,10 @@ jobs:
         with:
           go-version: "1.25.x"
           cache: false
-      - name: Welch t-test, tiny vs random secrets (100k samples, pinned core)
+      - name: Welch t-test, tiny vs random secrets with random-vs-random controls (100k samples, 5 runs, pinned core)
         run: |
           uname -m
-          SILA_TIMING_TEST=1 SILA_TIMING_SAMPLES=100000 taskset -c 0 go test -count=1 -timeout 60m -run ConstantTimeStatistical -v ./secp256k1 | grep -E 'timing_test|^(---|ok|FAIL)'
+          SILA_TIMING_TEST=1 SILA_TIMING_SAMPLES=100000 SILA_TIMING_REPS=5 taskset -c 0 go test -count=1 -timeout 60m -run ConstantTimeStatistical -v ./secp256k1 | grep -E 'timing_test|^(---|ok|FAIL)'
 
   independent-verification:
     name: Independent oracle (907 cases)

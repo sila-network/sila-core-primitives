@@ -4,8 +4,10 @@
 package secp256k1
 
 import (
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"errors"
+	"io"
 )
 
 // SILA signature contract (development version; see
@@ -16,10 +18,16 @@ import (
 //     the protocol). It is interpreted as a big-endian integer mod n.
 //   - Signing is deterministic (RFC 6979, HMAC-SHA-256) and always returns
 //     a low-S signature (s <= (n-1)/2).
-//   - Verification and recovery accept only canonical values:
-//     1 <= r < n, 1 <= s <= (n-1)/2 (high-S is rejected).
+//   - Strict parsing (ParseSignature, ParseRecoverableSignature) and Verify
+//     accept only canonical values: 1 <= r < n, 1 <= s <= (n-1)/2.
+//     Verify always rejects high-S.
+//   - Recovery-compatible parsing (the AllowHighS variants) also accepts
+//     (n-1)/2 < s < n, as raw public-key recovery does; such signatures
+//     can be recovered from but never pass Verify.
 //   - Compact encoding is r || s (64 bytes); the recoverable encoding is
 //     r || s || v (65 bytes) with recovery identifier v in {0, 1, 2, 3}.
+//     Transaction-level rules (v in {0, 1} only, offsets such as 27/28)
+//     belong to a higher layer (package txsig).
 
 var (
 	// ErrInvalidSignature denotes a malformed or non-canonical signature.
@@ -38,14 +46,37 @@ const (
 	RecoverableSignatureSize = 65
 )
 
-// Signature is a validated ECDSA signature. It always holds canonical,
-// low-S values. hasRecoveryID is false for signatures parsed from the
-// 64-byte compact form.
+// Signature is a validated ECDSA signature: 1 <= r < n and 1 <= s < n.
+// Signatures from Sign and from the strict parsers are always low-S;
+// highS can only be set by the AllowHighS parsers. hasRecoveryID is false
+// for signatures parsed from the 64-byte compact form.
 type Signature struct {
 	r, s          [32]byte
 	v             byte
 	hasRecoveryID bool
+	highS         bool
 	valid         bool
+}
+
+// IsLowS reports whether s <= (n-1)/2.
+func (sig Signature) IsLowS() bool { return sig.valid && !sig.highS }
+
+// Normalize returns the low-S form of sig: (r, n-s), with bit 0 of the
+// recovery identifier flipped (negating s mirrors R). A low-S signature is
+// returned unchanged. Both forms recover the same public key.
+func (sig Signature) Normalize() Signature {
+	if !sig.valid || !sig.highS {
+		return sig
+	}
+	var s scalar
+	s.setBytesCanonical(&sig.s)
+	s.neg(&s)
+	sig.s = s.bytes()
+	sig.highS = false
+	if sig.hasRecoveryID {
+		sig.v ^= 1
+	}
+	return sig
 }
 
 // R returns a copy of the r component (32 bytes, big-endian).
@@ -87,7 +118,7 @@ func ParseSignature(b []byte) (Signature, error) {
 	if len(b) != SignatureSize {
 		return Signature{}, ErrInvalidSignature
 	}
-	return newSignature((*[32]byte)(b[:32]), (*[32]byte)(b[32:64]), 0, false)
+	return newSignature((*[32]byte)(b[:32]), (*[32]byte)(b[32:64]), 0, false, false)
 }
 
 // ParseRecoverableSignature decodes r || s || v with the same checks and
@@ -96,39 +127,107 @@ func ParseRecoverableSignature(b []byte) (Signature, error) {
 	if len(b) != RecoverableSignatureSize || b[64] > 3 {
 		return Signature{}, ErrInvalidSignature
 	}
-	return newSignature((*[32]byte)(b[:32]), (*[32]byte)(b[32:64]), b[64], true)
+	return newSignature((*[32]byte)(b[:32]), (*[32]byte)(b[32:64]), b[64], true, false)
 }
 
-func newSignature(r, s *[32]byte, v byte, hasV bool) (Signature, error) {
-	var rs, ss scalar
-	if rs.setBytesCanonical(r) != 1 || rs.isZero() == 1 ||
-		ss.setBytesCanonical(s) != 1 || ss.isZero() == 1 || ss.isHigh() == 1 {
+// ParseSignatureAllowHighS is ParseSignature for the recovery-compatible
+// context: it also accepts (n-1)/2 < s < n. The result never passes Verify
+// unless it is first normalized with Normalize.
+func ParseSignatureAllowHighS(b []byte) (Signature, error) {
+	if len(b) != SignatureSize {
 		return Signature{}, ErrInvalidSignature
 	}
-	return Signature{r: *r, s: *s, v: v, hasRecoveryID: hasV, valid: true}, nil
+	return newSignature((*[32]byte)(b[:32]), (*[32]byte)(b[32:64]), 0, false, true)
+}
+
+// ParseRecoverableSignatureAllowHighS is ParseRecoverableSignature for the
+// recovery-compatible context (raw public-key recovery): 1 <= r < n,
+// 1 <= s < n, v in {0, 1, 2, 3}. RecoverPublicKey accepts the result;
+// Verify rejects high-S.
+func ParseRecoverableSignatureAllowHighS(b []byte) (Signature, error) {
+	if len(b) != RecoverableSignatureSize || b[64] > 3 {
+		return Signature{}, ErrInvalidSignature
+	}
+	return newSignature((*[32]byte)(b[:32]), (*[32]byte)(b[32:64]), b[64], true, true)
+}
+
+func newSignature(r, s *[32]byte, v byte, hasV, allowHighS bool) (Signature, error) {
+	var rs, ss scalar
+	if rs.setBytesCanonical(r) != 1 || rs.isZero() == 1 ||
+		ss.setBytesCanonical(s) != 1 || ss.isZero() == 1 {
+		return Signature{}, ErrInvalidSignature
+	}
+	high := ss.isHigh() == 1
+	if high && !allowHighS {
+		return Signature{}, ErrInvalidSignature
+	}
+	return Signature{r: *r, s: *s, v: v, hasRecoveryID: hasV, highS: high, valid: true}, nil
 }
 
 // scalars returns r and s as scalars; ok is false for an invalid value.
+// High s is accepted only if the signature was parsed as recovery-compatible.
 func (sig *Signature) scalars() (r, s scalar, ok bool) {
 	if !sig.valid {
 		return r, s, false
 	}
 	okR := r.setBytesCanonical(&sig.r) & (1 ^ r.isZero())
-	okS := s.setBytesCanonical(&sig.s) & (1 ^ s.isZero()) & (1 ^ s.isHigh())
+	okS := s.setBytesCanonical(&sig.s) & (1 ^ s.isZero())
+	if !sig.highS {
+		okS &= 1 ^ s.isHigh()
+	}
 	return r, s, okR&okS == 1
 }
 
 // Sign produces a deterministic low-S ECDSA signature with a recovery
 // identifier over a 32-byte digest. All operations involving the private
 // key and the nonce are constant time.
+//
+// Interoperability evidence (byte-identical outputs against independent
+// implementations) is recorded in docs/SECP256K1-PARITY.md.
 func Sign(priv *PrivateKey, digest [DigestSize]byte) (Signature, error) {
+	return sign(priv, &digest, nil)
+}
+
+// ExtraEntropySize is the size of the additional data mixed into the nonce
+// by SignWithExtraEntropy.
+const ExtraEntropySize = 32
+
+// SignWithExtraEntropy signs like Sign but mixes 32 bytes of additional
+// data into the RFC 6979 nonce derivation (RFC 6979 §3.6, "additional
+// data" appended after the private key and the digest). With fresh random
+// data this is "hedged" signing: it keeps the protection of RFC 6979
+// against a weak random source and adds protection against fault attacks
+// that need two signatures with the same nonce.
+//
+// The signature is valid and verifies like any other, but it is NOT
+// byte-identical to Sign's deterministic output (unless extra repeats).
+func SignWithExtraEntropy(priv *PrivateKey, digest [DigestSize]byte, extra [ExtraEntropySize]byte) (Signature, error) {
+	defer clear(extra[:])
+	return sign(priv, &digest, &extra)
+}
+
+// SignHedged is SignWithExtraEntropy with 32 bytes read from rand
+// (crypto/rand.Reader when rand is nil). See SignWithExtraEntropy.
+func SignHedged(priv *PrivateKey, digest [DigestSize]byte, rand io.Reader) (Signature, error) {
+	if rand == nil {
+		rand = cryptorand.Reader
+	}
+	var extra [ExtraEntropySize]byte
+	defer clear(extra[:])
+	if _, err := io.ReadFull(rand, extra[:]); err != nil {
+		return Signature{}, err
+	}
+	return sign(priv, &digest, &extra)
+}
+
+func sign(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropySize]byte) (Signature, error) {
 	if priv == nil || !priv.valid {
 		return Signature{}, ErrInvalidPrivateKey
 	}
 	var z scalar
-	z.setBytesReduced(&digest)
+	z.setBytesReduced(digest)
 
-	nonces := newRFC6979(&priv.d, &z)
+	nonces := newRFC6979(&priv.d, &z, extra)
 	defer nonces.wipe()
 	for {
 		var k scalar
@@ -186,9 +285,12 @@ func signWithNonce(d, z, k *scalar) (Signature, bool) {
 }
 
 // Verify reports whether sig is a valid signature of digest by pub under
-// the SILA contract (canonical, low-S). Inputs are public.
+// the strict rules (canonical, low-S). A high-S signature is always
+// rejected; use
+// Normalize first if the caller's context accepts malleable signatures.
+// Inputs are public.
 func Verify(pub PublicKey, digest [DigestSize]byte, sig Signature) bool {
-	if !pub.valid {
+	if !pub.valid || sig.highS {
 		return false
 	}
 	r, s, ok := sig.scalars()
@@ -228,8 +330,12 @@ func Verify(pub PublicKey, digest [DigestSize]byte, sig Signature) bool {
 }
 
 // RecoverPublicKey returns the public key that produced sig over digest,
-// using the signature's recovery identifier. The recovered key is the
-// unique key for which Verify(key, digest, sig) is true given (r, s, v).
+// using the signature's recovery identifier v in {0, 1, 2, 3}. It is the
+// generic mathematical recovery: it accepts high-S signatures parsed with
+// the AllowHighS variants and v = 2/3;
+// transaction-level restrictions belong to a higher layer (package txsig).
+// For a low-S signature, the recovered key is the unique key for which
+// Verify(key, digest, sig) is true given (r, s, v).
 func RecoverPublicKey(digest [DigestSize]byte, sig Signature) (PublicKey, error) {
 	if !sig.valid || !sig.hasRecoveryID || sig.v > 3 {
 		return PublicKey{}, ErrRecoveryFailed
@@ -273,22 +379,29 @@ func RecoverPublicKey(digest [DigestSize]byte, sig Signature) (PublicKey, error)
 // for a 256-bit group order: qlen = hlen = 256, so bits2int is the identity
 // and bits2octets(h) = int(h) mod n. HMAC is computed on fixed-size stack
 // buffers (hmacSHA256) so that the key-derived state can be wiped.
+//
+// With extra != nil, the 32 extra bytes are appended to int2octets(d) ||
+// bits2octets(h) in steps d and f (RFC 6979 §3.6, "additional data").
 type rfc6979 struct {
 	k, v [32]byte
 	more bool
 }
 
-func newRFC6979(d, z *scalar) rfc6979 {
+func newRFC6979(d, z *scalar, extra *[ExtraEntropySize]byte) rfc6979 {
 	var g rfc6979
 	for i := range g.v {
 		g.v[i] = 0x01
 	}
-	x := d.bytes()                                            // int2octets(d)
-	h1 := z.bytes()                                           // bits2octets(digest) = digest mod n
-	g.k = hmacSHA256(&g.k, g.v[:], []byte{0x00}, x[:], h1[:]) // step d
-	g.v = hmacSHA256(&g.k, g.v[:])                            // step e
-	g.k = hmacSHA256(&g.k, g.v[:], []byte{0x01}, x[:], h1[:]) // step f
-	g.v = hmacSHA256(&g.k, g.v[:])                            // step g
+	x := d.bytes()  // int2octets(d)
+	h1 := z.bytes() // bits2octets(digest) = digest mod n
+	var data []byte
+	if extra != nil {
+		data = extra[:]
+	}
+	g.k = hmacSHA256(&g.k, g.v[:], []byte{0x00}, x[:], h1[:], data) // step d
+	g.v = hmacSHA256(&g.k, g.v[:])                                  // step e
+	g.k = hmacSHA256(&g.k, g.v[:], []byte{0x01}, x[:], h1[:], data) // step f
+	g.v = hmacSHA256(&g.k, g.v[:])                                  // step g
 	clear(x[:])
 	return g
 }
@@ -312,11 +425,12 @@ func (g *rfc6979) wipe() {
 }
 
 // hmacSHA256 computes HMAC-SHA-256 (RFC 2104) with a 32-byte key over the
-// concatenation of parts (at most 97 bytes in total, which covers every
-// RFC 6979 message here). All buffers are on the stack and are cleared.
+// concatenation of parts (at most 129 bytes in total, which covers every
+// RFC 6979 message here, including 32 bytes of extra data). All buffers
+// are on the stack and are cleared.
 func hmacSHA256(key *[32]byte, parts ...[]byte) [32]byte {
 	const block = 64
-	var buf [block + 97]byte
+	var buf [block + 129]byte
 	defer clear(buf[:])
 	n := block
 	for _, p := range parts {

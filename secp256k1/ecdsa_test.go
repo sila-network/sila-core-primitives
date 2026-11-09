@@ -174,8 +174,9 @@ func TestHighSIsRejectedByVerifyAndRecover(t *testing.T) {
 	pub, _ := priv.PublicKey()
 	digest := sha256.Sum256([]byte("malleability"))
 	sig, _ := Sign(priv, digest)
-	// Build the malleated (r, n-s) form directly: it is mathematically valid
-	// ECDSA, but the SILA contract rejects it.
+	// Build the malleated (r, n-s) form directly as a strict signature
+	// object (which the parsers never produce): it is mathematically valid
+	// ECDSA, but the strict rules reject it in Verify and in recovery.
 	s := new(big.Int).SetBytes(sig.s[:])
 	high := Signature{r: sig.r, s: *to32(new(big.Int).Sub(bigN, s)), v: sig.v ^ 1, hasRecoveryID: true, valid: true}
 	r := new(big.Int).SetBytes(sig.r[:])
@@ -379,7 +380,7 @@ func TestHMACSHA256MatchesStandardLibrary(t *testing.T) {
 	for i := 0; i < 500; i++ {
 		var key [32]byte
 		rng.Read(key[:])
-		msg := make([]byte, rng.Intn(98))
+		msg := make([]byte, rng.Intn(130))
 		rng.Read(msg)
 		cut := rng.Intn(len(msg) + 1)
 		got := hmacSHA256(&key, msg[:cut], msg[cut:])

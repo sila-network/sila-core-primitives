@@ -78,6 +78,7 @@ jobs:
           for f in FuzzPublicKeyRoundTrip FuzzParseAndVerifySignature FuzzSignVerifyRecover; do
             go test -run '^$' -fuzz "^${f}\$" -fuzztime 15s ./secp256k1
           done
+          go test -run '^$' -fuzz '^FuzzParseCompactYParity$' -fuzztime 15s ./txsig
 
   cross-arch:
     name: Other architectures (386 native; s390x big-endian, ppc64le, riscv64 under QEMU)
@@ -100,13 +101,13 @@ jobs:
             echo "== $arch"
             GOARCH=$arch go vet ./...
             emu=$(command -v "qemu-$arch" || command -v "qemu-$arch-static")
-            for pkg in keccak secp256k1; do
+            for pkg in keccak secp256k1 txsig account; do
               GOARCH=$arch go test -c -o "$RUNNER_TEMP/$pkg.$arch" "./$pkg"
               (cd "$pkg" && "$emu" "$RUNNER_TEMP/$pkg.$arch" -test.short -test.count=1 -test.v | grep -E '^(--- |PASS|FAIL|ok)')
             done
           done
       - name: loong64 (build and vet only; no emulator on the runner image)
-        run: GOARCH=loong64 go vet ./... && GOARCH=loong64 go test -c -o /dev/null ./keccak && GOARCH=loong64 go test -c -o /dev/null ./secp256k1
+        run: GOARCH=loong64 go vet ./... && GOARCH=loong64 go test -c -o /dev/null ./keccak && GOARCH=loong64 go test -c -o /dev/null ./secp256k1 && GOARCH=loong64 go test -c -o /dev/null ./txsig
 
   independent-verification:
     name: Independent oracle (907 cases)
@@ -153,5 +154,7 @@ jobs:
           go test -count=1 -tags purego -run 'TestSameOutput|TestRandomAgainstGeth' .
       - name: secp256k1 differential (libsecp256k1 via cgo, decred v4)
         run: go test -count=1 -run 'Secp256k1' -v . | grep -E '^(ok|FAIL|---)'
+      - name: secp256k1 parity (addresses, raw recovery, value rules, transaction values, hedged nonces)
+        run: go test -count=1 -run 'Parity' -v . | grep -E '^(ok|FAIL|---)|parity_test'
       # Performance is measured on dedicated hardware with run.sh, not on
       # shared CI runners whose timings are not comparable.

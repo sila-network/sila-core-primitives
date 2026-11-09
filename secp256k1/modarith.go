@@ -276,3 +276,14 @@ func exponentBytes(m limbs, delta int64, shift uint) [32]byte {
 	limbsToBytes(&out, &x)
 	return out
 }
+
+// addLimbs returns x + y and the carry out (no reduction).
+func addLimbs(x, y *limbs) (limbs, uint64) {
+	var z limbs
+	var c uint64
+	z[0], c = bits.Add64(x[0], y[0], 0)
+	z[1], c = bits.Add64(x[1], y[1], c)
+	z[2], c = bits.Add64(x[2], y[2], c)
+	z[3], c = bits.Add64(x[3], y[3], c)
+	return z, c
+}

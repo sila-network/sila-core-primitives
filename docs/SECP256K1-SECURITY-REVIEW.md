@@ -26,6 +26,16 @@ implementations are used only as test oracles in the separate module
 curve constants are mathematical facts derived and checked independently
 with `math/big` in tests.
 
+`scripts/check_independence.sh` (CI job "SILA independence") checks, on
+every change: no requirements in `go.mod`; a transitive production
+dependency graph of only SILA and standard-library packages; an offline
+build and test run (no module proxy, cgo disabled); and a probe binary
+linking `secp256k1`, `txsig`, `account` and `keccak` whose build metadata
+records no other module and whose strings contain no foreign project or
+network name. Protocol semantics are not imported either: the library sets
+no default network, chain identifier, transaction type or domain, and the
+open protocol items are BLOCKERs in the contract (§7).
+
 ## 3. Secret-handling design
 
 | Secret | Where | Protection |

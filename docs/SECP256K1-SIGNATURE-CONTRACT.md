@@ -1,8 +1,12 @@
 # SILA secp256k1 signature contract
 
-Status: **engineering contract following the owner's decision of
+Status: **engineering contract following the owner's decisions of
 2026-11-09 (PR #3): functional parity with the reference secp256k1
-behaviour first, then measurable improvement.** The implementation in
+behaviour first, then measurable improvement; SILA secp256k1 is an
+independent, SILA-owned primitive.** External behaviour is a **test
+target** only, never a runtime, naming, protocol or network dependency:
+the module has no third-party dependency, links no external library and
+works fully offline (checked by `scripts/check_independence.sh` in CI). The implementation in
 `secp256k1/`, `txsig/` and `account/` follows this contract. Section 7
 lists what is deliberately **not** defined here because the project has
 not specified it yet.
@@ -62,11 +66,18 @@ generator G, a = 0, b = 7, cofactor 1).
   R.x ≥ n.
 - The two 64-byte forms are different formats. They coincide only when
   v = 0; the caller must know which format it holds.
-- Transaction-level encodings of v (`txsig`): the legacy form v + 27
+- Transaction-level encodings of v (`txsig`): the offset form v + 27
   (`LegacyV` / `FromLegacyV`) and the chain-bound form
   v + 35 + 2·chainID (`ChainV` / `FromChainV`); the chain identifier is
   always a parameter, and 0 and values that would overflow 64 bits are
   rejected.
+- **Decision status of these formulas.** They are provided because the
+  owner asked for parity with these widely used encodings, and they are
+  tested against the reference. They are **library formulas, not SILA
+  protocol rules**: no SILA transaction format, chain identifier or
+  replay-protection scheme selects them yet, and the library sets no
+  default network, chain identifier, transaction type or domain. Adopting
+  (or rejecting) them for SILA is a protocol decision recorded in §7.
 
 ## 6. Validation contexts
 
@@ -85,17 +96,18 @@ generator G, a = 0, b = 7, cofactor 1).
 - Recovery: for v ≥ 2, R.x = r + n must be < p; R must be a curve point;
   the recovered key must not be the point at infinity.
 
-## 7. Not defined here (requires a separate SILA specification)
+## 7. Not defined here (requires a SILA-owned specification)
 
-The library does not invent protocol constants. The following are open
-and must be specified by the project before integration:
+The library does not invent protocol constants and imports none from
+another network. Each item below is a **BLOCKER for protocol
+integration** (not for releasing the library as a primitive, which needs
+only its own API and safety requirements to be closed):
 
-1. The SILA transaction structure and its hashed encoding (what the 32-byte
-   digest is computed from), including any typed-transaction scheme.
-2. Domain separation between message types and networks.
-3. The SILA chain identifier(s) used with `txsig.ChainV`, and whether the
-   legacy (27/28) form is accepted at all.
-4. The textual address format (prefix, checksum) on top of the 20-byte
-   value from `account`.
-5. Key management outside the primitive: storage, backup, hardware
-   wallets or HSMs, hierarchical derivation.
+| # | Item | Status |
+|---|---|---|
+| 1 | SILA transaction structure, serialization and hashed encoding (what the 32-byte digest is computed from), incl. any typed-transaction scheme | **BLOCKER** — no SILA specification yet |
+| 2 | Message and domain separation between message types and networks | **BLOCKER** — no SILA specification yet |
+| 3 | SILA chain identifier(s) and replay protection: whether `txsig.ChainV` (v + 35 + 2·chainID) is adopted, with which identifier, and whether the offset form 27/28 is accepted at all | **BLOCKER** — owner decision |
+| 4 | Signature form in SILA transactions: 65-byte r ‖ s ‖ v or the 64-byte y-parity form | **BLOCKER** — owner decision |
+| 5 | Address presentation (prefix, checksum, text encoding) on top of the 20-byte value from `account` | **BLOCKER** — no SILA specification yet |
+| 6 | Key management outside the primitive: storage, backup, hardware wallets or HSMs, hierarchical derivation | out of scope of this primitive; separate SILA specification |

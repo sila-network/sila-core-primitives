@@ -20,6 +20,12 @@
 //   - The 64-byte compact form with the y-parity in the top bit of s,
 //     which is distinct from the generic 64-byte r || s.
 //
+// These are library formulas, not SILA protocol rules: whether a SILA
+// transaction format uses any of them, and with which chain identifier,
+// is decided by a SILA specification (docs/SECP256K1-SIGNATURE-CONTRACT.md,
+// section 7). The package sets no default network, chain identifier,
+// transaction type or domain.
+//
 // What is hashed and signed (transaction encoding, domain separation,
 // chain identifiers) is protocol-level and is not defined here.
 // Compatibility evidence against independent implementations is recorded

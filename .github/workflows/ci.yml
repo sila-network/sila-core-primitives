@@ -118,6 +118,18 @@ jobs:
       - name: loong64 (build and vet only; no emulator on the runner image)
         run: GOARCH=loong64 go vet ./... && GOARCH=loong64 go test -c -o /dev/null ./keccak && GOARCH=loong64 go test -c -o /dev/null ./secp256k1 && GOARCH=loong64 go test -c -o /dev/null ./txsig
 
+  independence:
+    name: SILA independence (dependency graph, offline build, binary metadata, naming)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: false
+      - name: Check independence
+        run: ./scripts/check_independence.sh
+
   timing:
     name: secp256k1 timing evidence (informational) / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

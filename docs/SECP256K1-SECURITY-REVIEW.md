@@ -1,109 +1,139 @@
 # SILA secp256k1 — internal security review (development)
 
-Date: 2026-11-09. **This is a review by the implementation team, not an
-independent audit.** It records what was checked, the evidence, and the
-risks that remain.
+Date: 2026-11-09 (updated after the parity and optimization rounds).
+**This is a review by the implementation team, not an independent
+audit.** It records what was checked, the evidence, and the risks that
+remain.
 
 ## 1. Scope
 
-`secp256k1/` at the head of `dev/secp256k1-v0.1`: field and scalar
-arithmetic, group law, constant-time scalar multiplication, private keys,
-RFC 6979 signing, verification, public-key recovery, and the SEC 1 and
-signature codecs.
+At the head of `dev/secp256k1-v0.1`:
+- `secp256k1/`: field and scalar arithmetic, group law, constant-time
+  scalar multiplication, private keys, RFC 6979 signing (deterministic and
+  hedged), verification, public-key recovery, SEC 1 and signature codecs,
+  and the variable-time public-input path (`vartime.go`);
+- `txsig/`: transaction-layer value rules and recovery-value encodings;
+- `account/`: 20-byte address derivation.
 
-## 2. Secret-handling design
+## 2. Independence
+
+The SILA module has no third-party dependencies and works offline; it does
+not connect to, or depend on, any blockchain network. Production code
+imports only the Go standard library and SILA packages, and names no
+external project (`TestIndependentProductionCode`). External
+implementations are used only as test oracles in the separate module
+`benchmarks/geth-compare`. No code was copied from them; the GLV and
+curve constants are mathematical facts derived and checked independently
+with `math/big` in tests.
+
+## 3. Secret-handling design
 
 | Secret | Where | Protection |
 |---|---|---|
-| Private key d | `PrivateKey.d` (scalar) | Range check, d·G, r·d and serialization are constant time. No `math/big`. |
-| Nonce k | inside `Sign` | Derived by RFC 6979 on stack buffers; k·G uses the constant-time base table; k⁻¹ uses fixed-exponent Montgomery exponentiation; k and k⁻¹ are overwritten after use. |
-| HMAC state (K, V) | `rfc6979` value on the stack | `hmacSHA256` uses fixed-size stack arrays, cleared on return. Sign makes 0 heap allocations (`TestSignDoesNotAllocate`), so no key-derived bytes are left in unreachable heap memory. |
+| Private key d | `PrivateKey.d` | Range check, d·G, r·d and serialization are constant time. No `math/big`. |
+| Nonce k | inside `sign` | RFC 6979 on stack buffers; k·G by the constant-time signed-digit base table; k⁻¹ by a fixed addition chain and a sliding window over the **public** exponent n − 2; k and k⁻¹ are overwritten after use. |
+| Extra entropy (hedged API) | `SignWithExtraEntropy`, `SignHedged` | Copied into the stack HMAC input, cleared after use. |
+| HMAC state (K, V) | `rfc6979` value on the stack | Fixed-size stack arrays, cleared. Sign makes 0 heap allocations (`TestSignDoesNotAllocate`, `TestSignHedged`). |
 
 Constant-time techniques:
-- Limb arithmetic only uses `math/bits` Add64/Sub64/Mul64 and masks. The
-  only branches depend on public constants: loop bounds and the nibbles of
-  the fixed exponents p−2, (p+1)/4 and n−2.
-- Complete projective addition and doubling formulas (Renes–Costello–Batina
-  2016, Alg. 7 and 9), so the identity, doubling and P + (−P) need no
-  branch.
-- Fixed 4-bit windows with full-table scans for every secret table lookup
-  (`point.lookup`).
-- Variable-time code (`wnaf5`, `linearCombinationVartime`) exists only for
+- Limb arithmetic uses only `math/bits` Add64/Sub64/Mul64 and masks.
+  Branches depend only on public constants (loop bounds, the bits of p − 2,
+  (p + 1)/4 and n − 2).
+- Complete projective formulas (Renes–Costello–Batina 2016, Alg. 7, 8, 9).
+  The mixed addition (Alg. 8) requires an affine operand that is not the
+  identity; base-table entries never are, and a zero digit discards the
+  sum with a constant-time select.
+- Signed radix-32 digits (Booth recoding), computed with masks; every
+  table lookup scans all 16 entries; the sign is applied with a
+  constant-time negation and select.
+- The variable-time code (Jacobian formulas with explicit special cases,
+  GLV split, wNAF) is confined to `vartime.go` and is reachable only from
   Verify and RecoverPublicKey, whose inputs are all public.
 
 Enforced by tests:
-- `TestNoVariableTimeImports`: production files may import only an
-  allow-list, and `math/big` is not on it.
-- `TestVariableTimeHelpersOnlyOnPublicPaths`: an AST check that the
-  variable-time helpers are called only from Verify and RecoverPublicKey.
+- `TestNoVariableTimeImports`: import allow-list; `math/big` is not on it.
+- `TestVariableTimeHelpersOnlyOnPublicPaths`: AST check that every
+  function defined in `vartime.go` is called only from Verify,
+  RecoverPublicKey and other `vartime.go` functions.
+- `TestCompiledConstantTimeFunctions` (run in CI): disassembles the
+  compiled field, scalar and point functions and fails on any conditional
+  branch other than the stack-growth prologue; a negative control shows
+  the detector finds the branches of a variable-time function. Passes for
+  amd64, arm64, 386, ppc64le and riscv64 machine code, with Go 1.23 and
+  1.25. `TestCompiledLoopsAreCounterBound` lists the branches of the
+  functions with loops (counter and public-index tests) for review.
 
-## 3. Findings during development (all fixed before this review)
+## 4. Findings during development (all fixed)
 
 | # | Finding | Fix | Regression evidence |
 |---|---|---|---|
-| S-1 | The initial package used variable-time `math/big` | Rewrote all arithmetic on constant-time limbs | `TestNoVariableTimeImports` |
-| S-2 | `crypto/hmac` allocates heap objects that hold the key-derived K and V and cannot be erased | Stack HMAC-SHA-256, cleared after use | `TestHMACSHA256MatchesStandardLibrary`, `TestSignDoesNotAllocate` |
-| S-3 | The nonce-generator state escaped to the heap | Made it a value type (stack-resident) | 0 allocs/op in Sign |
-| S-4 | An unchecked assumption about digests ≥ n | Measured: SILA = libsecp256k1 (RFC 6979 bits2octets); decred differs. Documented in the contract | `TestSecp256k1DigestAboveOrder` |
+| S-1 | The initial package used variable-time `math/big` | Constant-time limb arithmetic | `TestNoVariableTimeImports` |
+| S-2 | `crypto/hmac` leaves key-derived K and V in unreachable heap memory | Stack HMAC-SHA-256, cleared after use | `TestHMACSHA256MatchesStandardLibrary`, `TestSignDoesNotAllocate` |
+| S-3 | The nonce-generator state escaped to the heap | Value type on the stack | 0 allocs/op in Sign |
+| S-4 | An unchecked assumption about digests ≥ n | Measured; documented in the contract | `TestSecp256k1DigestAboveOrder` |
+| S-5 | High-S handling was one rule for all contexts; raw recovery must accept high-S, transactions must not | Strict and recovery-compatible parsers; `txsig` rules; `Verify` stays strict | `TestHighSContexts`, `TestParityRawRecovery`, `TestParityValidateSignatureValues` |
+| S-6 | Branch-free source does not guarantee branch-free machine code | Compiled-code check in CI on five architectures | `TestCompiledConstantTimeFunctions` |
+| S-7 | During the optimization round, one timing session showed \|t\| = 5.5 for k·G | Re-measured with 5× more samples and a random-vs-random control: \|t\| did not grow, and the control reached the same level (see §6) | `TestConstantTimeStatistical` (control class) |
 
-## 4. Correctness evidence
+## 5. Correctness evidence
+
+The full matrix (case → reference → test → result) is in
+[`SECP256K1-PARITY.md`](SECP256K1-PARITY.md). In addition:
 
 | Check | Result |
 |---|---|
-| Field and scalar operations vs `math/big` (edge values and random), including arbitrary 512-bit reduction inputs | identical |
-| Group law vs an affine textbook reference: n·G = O, (n−1)·G = −G, identity, doubling, scaled projective inputs | identical |
-| Signatures vs libsecp256k1 (C) | 1000/1000 random cases byte-identical, plus 50/50 with digests ≥ n |
-| Signatures vs decred (pure Go) | 1000/1000 byte-identical for digests < n |
-| Verify verdicts vs libsecp256k1 (valid, bit flips, high-S, random, wrong digest) | 2000/2000 identical |
-| Public-key parsing vs decred (valid, random x, corrupted) | 4000/4000 identical |
-| Recovery | both directions with libsecp256k1 and decred; v = 2/3 via a constructed R.x ≥ n case |
-| Wycheproof ECDSA secp256k1 "bitcoin" (low-S) | 464/464 verdicts identical |
-| Wycheproof "p1363" | 252/252 identical, except 72 valid high-S signatures that SILA rejects by contract |
-| Fuzzing | public-key round trip; parse + verify + recover; sign → verify → recover |
-| Architectures | amd64 and arm64 (CI); 386 native; s390x (big-endian), ppc64le and riscv64 under QEMU; loong64 build |
+| Field and scalar operations vs `math/big` (edge values and random), the fused field multiplication and squaring, the unrolled Montgomery reduction, both inversion chains | identical |
+| Group law vs an affine textbook reference; mixed vs complete addition; Jacobian formulas incl. P = Q, P = −Q, identity, Z ≠ 1 | identical |
+| GLV constants (λ, β, lattice, rounding constants) vs `math/big`; 3000 scalar splits recombine and stay below 2^128 | pass |
+| Variable-time combination vs the constant-time multiplications, incl. results equal to the identity | identical |
+| Fuzzing | 4 targets: public-key round trip; parse + verify + recover; sign → verify → recover; 64-byte y-parity form |
+| Architectures | amd64 and arm64 (Go 1.23 and 1.25, with `-race`); 386; s390x (big-endian), ppc64le and riscv64 under QEMU; loong64 build |
 
-## 5. Timing evidence
+## 6. Timing evidence
 
 `timing_test.go` (opt-in, `SILA_TIMING_TEST=1`) runs a dudect-style Welch
-t-test between tiny keys (1..255) and random keys, 20,000 interleaved
-samples per run, three runs per check, on the shared reference VM:
+t-test between tiny secrets (1..255) and random secrets, interleaved, on
+one pinned core, three repetitions per check; it fails only if every
+repetition exceeds |t| = 4.5. A control compares two random classes.
+Reference VM, after the optimization round:
 
-| Operation | \|t\| range over two sessions (6 runs) |
-|---|---|
-| k·G (base table) | 0.64 – 3.87 |
-| k·P (generic) | 0.48 – 3.71 |
-| scalar inverse | 0.49 – 4.39 |
-| Sign (end to end) | 1.47 – 4.84 (one run above 4.5) |
+| Operation | 20,000 samples (3 sessions × 3 runs) | 100,000 samples (2 sessions × 3 runs) |
+|---|---|---|
+| k·G | 1.69 – 5.50 | 0.38 – 3.53 |
+| control (random vs random k·G) | — | 0.71 – 3.96 |
+| k·P (generic) | 0.48 – 3.92 | 1.11 – 3.17 |
+| scalar inverse | 0.87 – 2.82 | 0.93 – 2.96 |
+| Sign (end to end) | 0.41 – 4.15 | 1.56 – 3.81 |
 
-A control between two random-key classes reached |t| = 3.6 on the same VM,
-so these numbers are within that machine's noise. No consistent leak was
-detected, but **Sign sits close to the bound**, and this test cannot rule
-out leaks below the noise floor or micro-architectural channels (cache,
-port contention) that wall-clock timing does not reveal.
+A real data-dependent difference grows with the number of samples (×√5 ≈
+2.2 here); these values did not, and the random-vs-random control reached
+the same level. **No leak was detected above the noise of this shared VM.**
+This cannot rule out smaller leaks or micro-architectural channels
+(cache, port contention) that wall-clock timing does not show.
 
-## 6. Residual risks (must be resolved or accepted before production)
+## 7. Residual risks (must be resolved or accepted before production)
 
-1. **No independent audit** of the arithmetic, the formulas or the
-   constant-time claims.
-2. **Timing evidence is limited** to wall-clock measurements on a shared VM.
-   Needed: millions of samples on dedicated, quiet hardware for each target
-   CPU, and ideally a tool-based constant-time check of the compiled code
-   (for example a ctgrind-style or binary-level analysis).
-3. **Compiler dependence:** Go gives no constant-time guarantee. A future
-   compiler could turn mask selections into branches. The compiled code
-   should be reviewed for each Go release used in production.
-4. **Memory hygiene is best-effort:** `PrivateKey.Zero`, the cleared stack
-   buffers and the zero-allocation Sign reduce exposure. But Go may copy
-   stack frames (stack growth) or values passed by value, and callers'
-   own copies of key bytes are outside this package's control.
-5. **Fault attacks:** deterministic signing without extra entropy is
-   exposed to fault-injection attacks (a glitch during signing can leak
-   the key from two signatures over the same digest). Mitigation, hedged
-   signing, is an OPEN protocol choice.
-6. **Protocol decisions are open** (`SECP256K1-SIGNATURE-CONTRACT.md`):
-   hashed encoding and domain separation, compact or recoverable form, the
-   policy for v = 2/3, the canonical public-key form, and addresses.
-7. **Performance:** pure Go is 2–3.4× slower than libsecp256k1. This is
-   acceptable for wallets and signing services, but node-level verification
-   throughput must be sized against the measured numbers
-   (`SECP256K1-PERFORMANCE.md`).
+1. **No independent audit** of the arithmetic, the formulas, the GLV code
+   or the constant-time claims.
+2. **Timing evidence is limited** to a shared VM. Needed: millions of
+   samples on dedicated, quiet hardware for each target CPU (amd64 and
+   arm64 at least), with frequency scaling disabled.
+3. **Compiler dependence:** Go gives no constant-time guarantee. The
+   compiled-code check covers the listed functions for the Go versions in
+   CI; it must be re-run (it is, in CI) for every Go release used in
+   production, and it does not check functions with loops beyond listing
+   their branches.
+4. **Memory hygiene is best-effort:** `PrivateKey.Zero`, cleared stack
+   buffers and zero-allocation signing reduce exposure, but Go may copy
+   stack frames (stack growth), and callers' copies of key bytes are
+   outside the package's control.
+5. **Fault attacks:** the default deterministic signing is exposed to
+   fault injection (a glitch during signing can leak the key from two
+   signatures over the same digest). `SignHedged` mitigates this; using it
+   is the caller's or the protocol's decision.
+6. **Protocol integration is not specified** (contract §7): the transaction
+   encoding, chain identifier, domain separation and address text format.
+   The library defines none of them.
+7. **Performance:** libsecp256k1 (C) is 12 % faster for signing and 33 %
+   faster for verification and recovery (`SECP256K1-PERFORMANCE.md`).
+   Node-level throughput must be sized on the measured numbers.

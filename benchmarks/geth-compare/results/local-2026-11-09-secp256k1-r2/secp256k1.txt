@@ -1,4 +1,4 @@
-# cpu: Intel(R) Xeon(R) Processor @ 2.10GHz; go: go1.25.0; taskset -c 2; 8 runs
+# cpu: Intel(R) Xeon(R) Processor @ 2.10GHz; go: go1.25.0 (module toolchain); taskset -c 2; 8 runs
 goos: linux
 goarch: amd64
 pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare

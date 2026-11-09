@@ -15,3 +15,7 @@ This product includes ECDSA secp256k1 test vectors from Project Wycheproof
 (https://github.com/C2SP/wycheproof), licensed under the Apache License,
 Version 2.0, reproduced unchanged for verification only; see
 secp256k1/testdata/wycheproof/README.md.
+
+The txsig tests include two signature test vectors published in ERC-2098
+(https://eips.ethereum.org/EIPS/eip-2098, dedicated to the public domain
+under CC0), reproduced for verification only.

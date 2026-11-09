@@ -1,41 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ahmed Ibrahim
 
-// Package secp256k1 validates and serializes SEC 1 public keys for the
-// secp256k1 curve used by the SILA protocol.
-//
-// This package currently handles PUBLIC data only. Its math/big operations
-// are not constant time. Do not pass private scalars or other secrets to it.
 package secp256k1
 
-import (
-	"errors"
-	"math/big"
-)
+import "errors"
 
 // ErrInvalidPublicKey denotes an unsupported encoding or a point that is not
 // on the specified elliptic curve.
 var ErrInvalidPublicKey = errors.New("sila/secp256k1: invalid public key")
 
-const primeHex = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F"
-
-var fieldPrime = func() *big.Int {
-	p, ok := new(big.Int).SetString(primeHex, 16)
-	if !ok {
-		panic("sila/secp256k1: invalid field modulus")
-	}
-	return p
-}()
-
-var sqrtExponent = func() *big.Int {
-	// For this field p mod 4 = 3, so sqrt(a) = a^((p+1)/4) mod p.
-	exp := new(big.Int).Add(fieldPrime, big.NewInt(1))
-	return exp.Rsh(exp, 2)
-}()
-
-// PublicKey is an immutable, validated affine point. Its zero value is
-// invalid and cannot be serialized. Coordinates are always 32-byte big-endian.
-// There is intentionally no secret scalar or signing API in this package.
+// PublicKey is an immutable, validated affine point other than the point at
+// infinity. Its zero value is invalid and cannot be serialized.
+// Coordinates are always 32-byte big-endian.
 type PublicKey struct {
 	x, y  [32]byte
 	valid bool
@@ -44,63 +20,75 @@ type PublicKey struct {
 // ParsePublicKey accepts SEC 1 compressed (33-byte, 0x02/0x03 prefix) and
 // uncompressed (65-byte, 0x04 prefix) public keys. It rejects infinity,
 // hybrid encodings, noncanonical coordinates and points outside secp256k1.
+// secp256k1 has prime order and cofactor 1, so every point on the curve
+// other than infinity is in the prime-order subgroup.
+//
+// Inputs are public; validity decisions may branch.
 func ParsePublicKey(data []byte) (PublicKey, error) {
 	var out PublicKey
-
+	var x, y fieldElement
 	switch {
 	case len(data) == 33 && (data[0] == 0x02 || data[0] == 0x03):
-		x := new(big.Int).SetBytes(data[1:])
-		if x.Cmp(fieldPrime) >= 0 {
+		if x.setBytes((*[32]byte)(data[1:33])) != 1 {
 			return out, ErrInvalidPublicKey
 		}
-
-		// Solve y^2 = x^3 + 7 mod p, and verify a root actually exists.
-		rhs := curveRHS(x)
-		y := new(big.Int).Exp(rhs, sqrtExponent, fieldPrime)
-		y2 := new(big.Int).Mul(y, y)
-		y2.Mod(y2, fieldPrime)
-		if y2.Cmp(rhs) != 0 {
+		if !liftX(&y, &x, uint64(data[0]&1)) {
 			return out, ErrInvalidPublicKey
 		}
-
-		wantParity := uint(data[0] & 1)
-		if y.Bit(0) != wantParity {
-			y.Sub(fieldPrime, y)
-		}
-		if y.Bit(0) != wantParity || y.Cmp(fieldPrime) >= 0 {
-			return out, ErrInvalidPublicKey
-		}
-
-		copy(out.x[:], data[1:])
-		y.FillBytes(out.y[:])
-
 	case len(data) == 65 && data[0] == 0x04:
-		x := new(big.Int).SetBytes(data[1:33])
-		y := new(big.Int).SetBytes(data[33:65])
-		if x.Cmp(fieldPrime) >= 0 || y.Cmp(fieldPrime) >= 0 {
+		if x.setBytes((*[32]byte)(data[1:33]))&y.setBytes((*[32]byte)(data[33:65])) != 1 {
 			return out, ErrInvalidPublicKey
 		}
-		y2 := new(big.Int).Mul(y, y)
-		y2.Mod(y2, fieldPrime)
-		if y2.Cmp(curveRHS(x)) != 0 {
+		if isOnCurve(&x, &y) != 1 {
 			return out, ErrInvalidPublicKey
 		}
-
-		copy(out.x[:], data[1:33])
-		copy(out.y[:], data[33:65])
-
 	default:
 		return out, ErrInvalidPublicKey
 	}
+	out.x = x.bytes()
+	out.y = y.bytes()
 	out.valid = true
 	return out, nil
 }
 
-func curveRHS(x *big.Int) *big.Int {
-	rhs := new(big.Int).Mul(x, x)
-	rhs.Mul(rhs, x)
-	rhs.Add(rhs, big.NewInt(7))
-	return rhs.Mod(rhs, fieldPrime)
+// liftX solves y^2 = x^3 + 7 for y with the requested parity. It returns
+// false if x is not the x-coordinate of a curve point.
+func liftX(y, x *fieldElement, oddY uint64) bool {
+	var rhs fieldElement
+	rhs.square(x)
+	rhs.mul(&rhs, x)
+	rhs.add(&rhs, &curveB)
+	if y.sqrt(&rhs) != 1 {
+		return false
+	}
+	var negY fieldElement
+	negY.neg(y)
+	y.selectFrom(&negY, y, y.isOdd()^oddY)
+	return y.isOdd() == oddY
+}
+
+// publicKeyFromPoint converts a group element into a PublicKey, rejecting
+// the point at infinity.
+func publicKeyFromPoint(p *point) (PublicKey, error) {
+	var out PublicKey
+	x, y, ok := p.affine()
+	if ok != 1 {
+		return out, ErrInvalidPublicKey
+	}
+	out.x = x.bytes()
+	out.y = y.bytes()
+	out.valid = true
+	return out, nil
+}
+
+// point returns the key as a projective point (Z = 1).
+func (k *PublicKey) point() point {
+	var x, y fieldElement
+	x.setBytes(&k.x)
+	y.setBytes(&k.y)
+	var p point
+	p.setAffine(&x, &y)
+	return p
 }
 
 // Compressed returns the canonical 33-byte SEC 1 representation of a key.
@@ -126,11 +114,15 @@ func (k PublicKey) Uncompressed() ([65]byte, error) {
 	return result, nil
 }
 
-// Coordinates returns a COPY of the validated public coordinates, not
-// mutable internal big.Int references.
+// Coordinates returns copies of the validated affine coordinates.
 func (k PublicKey) Coordinates() ([32]byte, [32]byte, error) {
 	if !k.valid {
 		return [32]byte{}, [32]byte{}, ErrInvalidPublicKey
 	}
 	return k.x, k.y, nil
+}
+
+// Equal reports whether two keys are the same valid point.
+func (k PublicKey) Equal(other PublicKey) bool {
+	return k.valid && other.valid && k.x == other.x && k.y == other.y
 }

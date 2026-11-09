@@ -144,20 +144,34 @@ func FuzzSignVerifyRecover(f *testing.F) {
 	})
 }
 
-// Variable-time helpers may only be called from the public-input entry
-// points Verify and RecoverPublicKey (and from each other). This static
-// check stops a future change from routing a secret (a private key or a
-// nonce) through them.
+// Functions defined in vartime.go (variable-time, public inputs only) may
+// be called only from the public-input entry points Verify and
+// RecoverPublicKey, and from each other. This static check stops a future
+// change from routing a secret (a private key or a nonce) through them.
 func TestVariableTimeHelpersOnlyOnPublicPaths(t *testing.T) {
-	vartime := map[string]bool{"linearCombinationVartime": true, "wnaf5": true}
-	allowedCallers := map[string]bool{"Verify": true, "RecoverPublicKey": true, "linearCombinationVartime": true}
+	fset := token.NewFileSet()
+	vf, err := parser.ParseFile(fset, "vartime.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vartime := map[string]bool{}
+	for _, decl := range vf.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			vartime[fn.Name.Name] = true
+		}
+	}
+	for _, name := range []string{"linearCombinationVartime", "wnafVartime", "splitScalarVartime", "jacAdd", "jacAddAffine", "jacDouble"} {
+		if !vartime[name] {
+			t.Fatalf("%s is not defined in vartime.go", name)
+		}
+	}
+	allowedCallers := map[string]bool{"Verify": true, "RecoverPublicKey": true}
 	files, _ := filepath.Glob("*.go")
 	calls := 0
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
+		if strings.HasSuffix(f, "_test.go") || f == "vartime.go" {
 			continue
 		}
-		fset := token.NewFileSet()
 		af, err := parser.ParseFile(fset, f, nil, 0)
 		if err != nil {
 			t.Fatal(err)
@@ -172,17 +186,24 @@ func TestVariableTimeHelpersOnlyOnPublicPaths(t *testing.T) {
 				if !ok {
 					return true
 				}
-				if id, ok := call.Fun.(*ast.Ident); ok && vartime[id.Name] {
+				var name string
+				switch f := call.Fun.(type) {
+				case *ast.Ident:
+					name = f.Name
+				case *ast.SelectorExpr:
+					name = f.Sel.Name
+				}
+				if vartime[name] {
 					calls++
 					if !allowedCallers[fn.Name.Name] {
-						t.Errorf("%s: %s calls variable-time %s", fset.Position(call.Pos()), fn.Name.Name, id.Name)
+						t.Errorf("%s: %s calls variable-time %s", fset.Position(call.Pos()), fn.Name.Name, name)
 					}
 				}
 				return true
 			})
 		}
 	}
-	if calls < 3 {
-		t.Fatalf("expected at least 3 call sites, found %d", calls)
+	if calls < 2 {
+		t.Fatalf("expected at least 2 call sites, found %d", calls)
 	}
 }

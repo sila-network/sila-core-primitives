@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -91,13 +92,17 @@ func TestConstantTimeStatistical(t *testing.T) {
 	if os.Getenv("SILA_TIMING_TEST") != "1" {
 		t.Skip("set SILA_TIMING_TEST=1 to run (needs a quiet machine)")
 	}
-	const samples = 20000
+	samples := 20000
+	if v, err := strconv.Atoi(os.Getenv("SILA_TIMING_SAMPLES")); err == nil && v > 0 {
+		samples = v
+	}
 	rng := rand.New(rand.NewSource(17))
 
 	// Class A: tiny secrets (1..255, mostly zero bits and windows).
 	// Class B: uniformly random full-size secrets.
 	small := make([]scalar, 256)
 	random := make([]scalar, 256)
+	random2 := make([]scalar, 256) // control class: also uniformly random
 	keysSmall := make([]*PrivateKey, 256)
 	keysRandom := make([]*PrivateKey, 256)
 	for i := range small {
@@ -105,6 +110,8 @@ func TestConstantTimeStatistical(t *testing.T) {
 		var buf [32]byte
 		rng.Read(buf[:])
 		random[i] = scalarFromBig(new(big.Int).SetBytes(buf[:]))
+		rng.Read(buf[:])
+		random2[i] = scalarFromBig(new(big.Int).SetBytes(buf[:]))
 		keysSmall[i] = &PrivateKey{d: small[i], valid: true}
 		keysRandom[i] = &PrivateKey{d: random[i], valid: true}
 	}
@@ -117,6 +124,11 @@ func TestConstantTimeStatistical(t *testing.T) {
 	}{
 		{"scalarBaseMult",
 			func(i int) func() { return func() { sink.scalarBaseMult(&small[i%256]) } },
+			func(i int) func() { return func() { sink.scalarBaseMult(&random[i%256]) } }},
+		// Control: two random classes. It must not show a difference; its
+		// |t| values show this machine's noise level.
+		{"control (rand)",
+			func(i int) func() { return func() { sink.scalarBaseMult(&random2[i%256]) } },
 			func(i int) func() { return func() { sink.scalarBaseMult(&random[i%256]) } }},
 		{"scalarMult",
 			func(i int) func() { return func() { sink.scalarMult(&small[i%256], &generator) } },

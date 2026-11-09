@@ -3,8 +3,6 @@
 
 package secp256k1
 
-import "math/bits"
-
 // Group arithmetic on secp256k1: y^2 = x^3 + 7 over GF(p).
 //
 // Points use homogeneous projective coordinates (X:Y:Z), x = X/Z,
@@ -18,10 +16,7 @@ import "math/bits"
 
 type point struct{ x, y, z fieldElement }
 
-// curveB3 is 3·b = 21.
-var curveB3 = fieldFromUint(21)
-
-// curveB is b = 7.
+// curveB is b = 7; the formulas multiply by 3b = 21 with mulSmall.
 var curveB = fieldFromUint(7)
 
 func (p *point) setIdentity() *point {
@@ -57,10 +52,10 @@ func (r *point) add(p, q *point) *point {
 	y3.sub(&x3, &y3)
 	x3.add(&t0, &t0)
 	t0.add(&x3, &t0)
-	t2.mul(&curveB3, &t2)
+	t2.mulSmall(&t2, 21)
 	z3.add(&t1, &t2)
 	t1.sub(&t1, &t2)
-	y3.mul(&curveB3, &y3)
+	y3.mulSmall(&y3, 21)
 	x3.mul(&t4, &y3)
 	t2.mul(&t3, &t1)
 	x3.sub(&t2, &x3)
@@ -83,7 +78,7 @@ func (r *point) double(p *point) *point {
 	z3.add(&z3, &z3)
 	t1.mul(&p.y, &p.z)
 	t2.square(&p.z)
-	t2.mul(&curveB3, &t2)
+	t2.mulSmall(&t2, 21)
 	x3.mul(&t2, &z3)
 	y3.add(&t0, &t2)
 	z3.mul(&t1, &z3)
@@ -218,123 +213,163 @@ func (r *point) scalarMult(k *scalar, p *point) *point {
 	return r
 }
 
-// baseTable[w][j] = j·16^w·G for the 64 windows: k·G then needs only 64
-// complete additions with constant-time lookups and no doublings.
-var baseTable = func() *[64][16]point {
-	var t [64][16]point
+// affinePoint is a point with Z = 1, stored as (x, y). It never
+// represents the identity.
+type affinePoint struct{ x, y fieldElement }
+
+// addMixed sets r = p + q for a projective p (any point, including the
+// identity) and an affine q (never the identity). Complete for these
+// inputs: Renes–Costello–Batina 2016, Algorithm 8 (a = 0), 11
+// multiplications and two multiplications by 3b. r may alias p.
+func (r *point) addMixed(p *point, q *affinePoint) *point {
+	var t0, t1, t2, t3, t4, x3, y3, z3 fieldElement
+	t0.mul(&p.x, &q.x)
+	t1.mul(&p.y, &q.y)
+	t3.add(&q.x, &q.y)
+	t4.add(&p.x, &p.y)
+	t3.mul(&t3, &t4)
+	t4.add(&t0, &t1)
+	t3.sub(&t3, &t4)
+	t4.mul(&q.y, &p.z)
+	t4.add(&t4, &p.y)
+	y3.mul(&q.x, &p.z)
+	y3.add(&y3, &p.x)
+	x3.add(&t0, &t0)
+	t0.add(&x3, &t0)
+	t2.mulSmall(&p.z, 21)
+	z3.add(&t1, &t2)
+	t1.sub(&t1, &t2)
+	y3.mulSmall(&y3, 21)
+	x3.mul(&t4, &y3)
+	t2.mul(&t3, &t1)
+	x3.sub(&t2, &x3)
+	y3.mul(&y3, &t0)
+	t1.mul(&t1, &z3)
+	y3.add(&t1, &y3)
+	t0.mul(&t0, &t3)
+	z3.mul(&z3, &t4)
+	z3.add(&z3, &t0)
+	r.x, r.y, r.z = x3, y3, z3
+	return r
+}
+
+// Fixed-base multiplication uses signed radix-32 digits (Booth
+// recoding): k = sum of d_i·32^i for i < baseWindows, with
+// d_i = (5-bit window i) + (bit 5i-1) - 32·(bit 5i+4), so d_i is in
+// [-16, 16]. Bit 259 of k is 0, so the top digit is non-negative and 52
+// windows cover every k < 2^256.
+const (
+	baseWindows = 52
+	baseEntries = 16
+)
+
+// baseTable[w][j] = (j+1)·32^w·G in affine form.
+var baseTable = func() *[baseWindows][baseEntries]affinePoint {
+	var t [baseWindows][baseEntries]affinePoint
 	base := generator
-	for w := 0; w < 64; w++ {
-		t[w][0].setIdentity()
-		t[w][1] = base
-		for j := 2; j < 16; j++ {
-			t[w][j].add(&t[w][j-1], &base)
+	var proj [baseEntries]point
+	for w := 0; w < baseWindows; w++ {
+		proj[0] = base
+		for j := 1; j < baseEntries; j++ {
+			proj[j].add(&proj[j-1], &base)
 		}
-		// Normalise entries to Z = 1 (public precomputation).
-		for j := 1; j < 16; j++ {
-			x, y, _ := t[w][j].affine()
-			t[w][j].setAffine(&x, &y)
-		}
+		batchAffine(t[w][:], proj[:])
+		// next base = 32·base = 2·(16·base)
 		var next point
-		next.double(&t[w][8]) // 16·base
-		x, y, _ := next.affine()
-		base.setAffine(&x, &y)
+		next.double(&proj[baseEntries-1])
+		base = next
 	}
 	return &t
 }()
 
-// scalarBaseMult sets r = k·G in constant time with respect to k.
+// batchAffine converts non-identity projective points to affine with one
+// field inversion (Montgomery's simultaneous inversion). Public data only.
+func batchAffine(out []affinePoint, in []point) {
+	prefix := make([]fieldElement, len(in))
+	acc := fieldFromUint(1)
+	for i := range in {
+		prefix[i] = acc
+		acc.mul(&acc, &in[i].z)
+	}
+	var inv fieldElement
+	inv.inv(&acc)
+	for i := len(in) - 1; i >= 0; i-- {
+		var zinv fieldElement
+		zinv.mul(&inv, &prefix[i])
+		inv.mul(&inv, &in[i].z)
+		out[i].x.mul(&in[i].x, &zinv)
+		out[i].y.mul(&in[i].y, &zinv)
+	}
+}
+
+// boothDigit returns the magnitude (0..16) and sign (1 if negative) of
+// the signed radix-32 digit w of the canonical value k, without branches.
+// The window index is public; the digit is secret.
+func boothDigit(k *limbs, w int) (mag, neg uint64) {
+	// Six bits: bit 5w-1 (zero for w = 0) and bits 5w .. 5w+4.
+	lo := 5*w - 1
+	var v uint64
+	if lo < 0 {
+		v = bitsAt(k, 0, 5) << 1
+	} else {
+		v = bitsAt(k, lo, 6)
+	}
+	// d = (v >> 1) + (v & 1) - 32·(v >> 5).
+	neg = v >> 5
+	d := (v >> 1) + (v & 1) // 0..32
+	// mag = neg ? 32 - d : d
+	mag = d ^ ((d ^ (32 - d)) & -neg)
+	return mag, neg
+}
+
+// bitsAt returns the n (<= 6) bits of k starting at bit position pos
+// (public); bits beyond 255 read as zero.
+func bitsAt(k *limbs, pos, n int) uint64 {
+	limb := pos / 64
+	off := uint(pos % 64)
+	var v uint64
+	if limb < 4 {
+		v = k[limb] >> off
+		if off+uint(n) > 64 && limb+1 < 4 {
+			v |= k[limb+1] << (64 - off)
+		}
+	}
+	return v & (1<<uint(n) - 1)
+}
+
+// lookupAffine sets r = table[mag-1] by scanning every entry (constant
+// time); for mag == 0 it is left at an arbitrary table entry, and the
+// caller discards the result of the addition.
+func (r *affinePoint) lookupAffine(table *[baseEntries]affinePoint, mag uint64) {
+	*r = table[0]
+	for i := 1; i < baseEntries; i++ {
+		d := uint64(i+1) ^ mag
+		eq := 1 ^ ((d | -d) >> 63)
+		r.x.selectFrom(&table[i].x, &r.x, eq)
+		r.y.selectFrom(&table[i].y, &r.y, eq)
+	}
+}
+
+// scalarBaseMult sets r = k·G in constant time with respect to k: 52
+// complete mixed additions with constant-time lookups, conditional
+// negations and conditional skips, and no doublings.
 func (r *point) scalarBaseMult(k *scalar) *point {
 	kc := k.canonical()
-	var acc, sel point
+	var acc, sum point
+	var sel affinePoint
+	var negY fieldElement
 	acc.setIdentity()
-	for w := 0; w < 64; w++ {
-		sel.lookup(&baseTable[w], window4(&kc, w))
-		acc.add(&acc, &sel)
+	for w := 0; w < baseWindows; w++ {
+		mag, neg := boothDigit(&kc, w)
+		sel.lookupAffine(&baseTable[w], mag)
+		negY.neg(&sel.y)
+		sel.y.selectFrom(&negY, &sel.y, neg)
+		sum.addMixed(&acc, &sel)
+		// Keep acc when the digit is zero.
+		nz := (mag | -mag) >> 63
+		acc.selectFrom(&sum, &acc, nz)
 	}
 	*r = acc
 	kc = limbs{}
 	return r
-}
-
-// ---------------------------------------------------------------------------
-// Variable-time helpers. These branch on, and index tables by, their scalar
-// inputs and are therefore restricted to PUBLIC values (signature
-// verification and public-key recovery). They are never called with a
-// private key or a nonce.
-
-// wnaf5 returns the width-5 non-adjacent form of the canonical value k,
-// least significant digit first: digits are 0 or odd in [-15, 15], and any
-// two non-zero digits are at least 5 positions apart.
-func wnaf5(k *limbs) [257]int8 {
-	var digits [257]int8
-	// x holds k with one extra limb of headroom for k + |d| carries.
-	x := [5]uint64{k[0], k[1], k[2], k[3], 0}
-	for i := 0; i < 257 && (x[0]|x[1]|x[2]|x[3]|x[4]) != 0; i++ {
-		if x[0]&1 == 1 {
-			d := int64(x[0] & 31)
-			if d >= 16 {
-				d -= 32
-			}
-			digits[i] = int8(d)
-			// x -= d
-			if d > 0 {
-				var b uint64
-				x[0], b = bits.Sub64(x[0], uint64(d), 0)
-				x[1], b = bits.Sub64(x[1], 0, b)
-				x[2], b = bits.Sub64(x[2], 0, b)
-				x[3], b = bits.Sub64(x[3], 0, b)
-				x[4], _ = bits.Sub64(x[4], 0, b)
-			} else {
-				var c uint64
-				x[0], c = bits.Add64(x[0], uint64(-d), 0)
-				x[1], c = bits.Add64(x[1], 0, c)
-				x[2], c = bits.Add64(x[2], 0, c)
-				x[3], c = bits.Add64(x[3], 0, c)
-				x[4], _ = bits.Add64(x[4], 0, c)
-			}
-		}
-		x[0] = x[0]>>1 | x[1]<<63
-		x[1] = x[1]>>1 | x[2]<<63
-		x[2] = x[2]>>1 | x[3]<<63
-		x[3] = x[3]>>1 | x[4]<<63
-		x[4] >>= 1
-	}
-	return digits
-}
-
-// linearCombinationVartime sets out = u1·G + u2·q for PUBLIC u1, u2, q.
-// u1·G uses the precomputed base table (no doublings); u2·q uses a
-// width-5 NAF with the odd multiples q, 3q, ..., 15q.
-func linearCombinationVartime(out *point, u1, u2 *scalar, q *point) {
-	var odd [8]point
-	odd[0] = *q
-	var q2 point
-	q2.double(q)
-	for i := 1; i < 8; i++ {
-		odd[i].add(&odd[i-1], &q2)
-	}
-	k2 := u2.canonical()
-	digits := wnaf5(&k2)
-	top := 256
-	for top >= 0 && digits[top] == 0 {
-		top--
-	}
-	var acc, neg point
-	acc.setIdentity()
-	for i := top; i >= 0; i-- {
-		acc.double(&acc)
-		if d := digits[i]; d > 0 {
-			acc.add(&acc, &odd[(d-1)/2])
-		} else if d < 0 {
-			neg.neg(&odd[(-d-1)/2])
-			acc.add(&acc, &neg)
-		}
-	}
-	k1 := u1.canonical()
-	for w := 0; w < 64; w++ {
-		if nib := window4(&k1, w); nib != 0 {
-			acc.add(&acc, &baseTable[w][nib])
-		}
-	}
-	*out = acc
 }

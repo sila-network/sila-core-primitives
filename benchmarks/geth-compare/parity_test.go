@@ -310,3 +310,120 @@ func TestParityHedgedNonce(t *testing.T) {
 		}
 	}
 }
+
+// Private-key validation == crypto.ToECDSA (strict 32-byte form, 1 <= d < n).
+func TestParityPrivateKeyValidation(t *testing.T) {
+	rng := rand.New(rand.NewSource(105))
+	one := big.NewInt(1)
+	var inputs [][]byte
+	for _, v := range []*big.Int{big.NewInt(0), one, big.NewInt(2), halfOrder, new(big.Int).Sub(orderN, one),
+		orderN, new(big.Int).Add(orderN, one), new(big.Int).Sub(new(big.Int).Lsh(one, 256), one)} {
+		inputs = append(inputs, fill32(v))
+	}
+	for i := 0; i < 2000; i++ {
+		b := make([]byte, 32)
+		rng.Read(b)
+		if i%4 == 0 {
+			for j := 0; j < 16; j++ {
+				b[j] = 0xff // near or above n
+			}
+		}
+		inputs = append(inputs, b)
+	}
+	inputs = append(inputs, nil, make([]byte, 31), append(fill32(one), 0), append([]byte{0}, fill32(one)...))
+	for _, in := range inputs {
+		_, gerr := gethcrypto.ToECDSA(in)
+		_, serr := sila.ParsePrivateKey(in)
+		if (gerr == nil) != (serr == nil) {
+			t.Fatalf("%x: go-ethereum err=%v, SILA err=%v", in, gerr, serr)
+		}
+	}
+}
+
+// Public-key derivation and encodings == crypto.FromECDSAPub and
+// crypto.CompressPubkey; parsing == crypto.UnmarshalPubkey (65 bytes) and
+// crypto.DecompressPubkey (33 bytes) on valid, corrupted, off-curve,
+// out-of-range and wrong-prefix inputs.
+func TestParityPublicKeys(t *testing.T) {
+	rng := rand.New(rand.NewSource(106))
+	p, _ := new(big.Int).SetString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", 16)
+	var inputs [][]byte
+	for i := 0; i < 500; i++ {
+		priv, kb, _ := randomKeyAndDigest(t, rng)
+		pub, _ := priv.PublicKey()
+		u, _ := pub.Uncompressed()
+		c, _ := pub.Compressed()
+		gk, _ := gethcrypto.ToECDSA(kb[:])
+		if !bytes.Equal(u[:], gethcrypto.FromECDSAPub(&gk.PublicKey)) || !bytes.Equal(c[:], gethcrypto.CompressPubkey(&gk.PublicKey)) {
+			t.Fatalf("public key encodings differ for case %d", i)
+		}
+		inputs = append(inputs, u[:], c[:])
+		// Prefix variants, a flipped bit, coordinates moved out of range.
+		for _, pre := range []byte{0, 1, 2, 3, 4, 5, 6, 7} {
+			v := append([]byte(nil), u[:]...)
+			v[0] = pre
+			inputs = append(inputs, v)
+			w := append([]byte(nil), c[:]...)
+			w[0] = pre
+			inputs = append(inputs, w)
+		}
+		f := append([]byte(nil), u[:]...)
+		f[1+rng.Intn(64)] ^= 1 << uint(rng.Intn(8))
+		inputs = append(inputs, f)
+		x := new(big.Int).SetBytes(u[1:33])
+		if xp := new(big.Int).Add(x, p); xp.BitLen() <= 256 {
+			o := append([]byte(nil), u[:]...)
+			copy(o[1:33], fill32(xp))
+			inputs = append(inputs, o)
+			oc := append([]byte(nil), c[:]...)
+			copy(oc[1:33], fill32(xp))
+			inputs = append(inputs, oc)
+		}
+		y := new(big.Int).SetBytes(u[33:65])
+		if yp := new(big.Int).Add(y, p); yp.BitLen() <= 256 {
+			o := append([]byte(nil), u[:]...)
+			copy(o[33:65], fill32(yp))
+			inputs = append(inputs, o)
+		}
+	}
+	for i := 0; i < 500; i++ {
+		r := make([]byte, 33)
+		rng.Read(r[1:])
+		r[0] = 2 + byte(i&1)
+		inputs = append(inputs, r) // random x: on the curve about half the time
+	}
+	inputs = append(inputs, []byte{0}, make([]byte, 65), make([]byte, 33))
+	accepted := 0
+	for _, in := range inputs {
+		var gok bool
+		switch len(in) {
+		case 65:
+			_, err := gethcrypto.UnmarshalPubkey(in)
+			gok = err == nil
+		case 33:
+			_, err := gethcrypto.DecompressPubkey(in)
+			gok = err == nil
+		}
+		k, err := sila.ParsePublicKey(in)
+		if gok != (err == nil) {
+			t.Fatalf("%x: go-ethereum %v, SILA %v", in, gok, err == nil)
+		}
+		if gok {
+			accepted++
+			// Both decode to the same point.
+			var gx, gy *big.Int
+			if len(in) == 65 {
+				gp, _ := gethcrypto.UnmarshalPubkey(in)
+				gx, gy = gp.X, gp.Y
+			} else {
+				gp, _ := gethcrypto.DecompressPubkey(in)
+				gx, gy = gp.X, gp.Y
+			}
+			sx, sy, _ := k.Coordinates()
+			if gx.Cmp(new(big.Int).SetBytes(sx[:])) != 0 || gy.Cmp(new(big.Int).SetBytes(sy[:])) != 0 {
+				t.Fatalf("%x decodes to different points", in)
+			}
+		}
+	}
+	t.Logf("%d inputs, %d accepted by both, the rest rejected by both", len(inputs), accepted)
+}

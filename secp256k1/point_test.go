@@ -193,7 +193,16 @@ func TestWNAFAndVartimeCombination(t *testing.T) {
 	ks := interesting(rng, bigN, 200)
 	for _, k := range ks {
 		kl := limbsFromBytes(to32(k))
-		digits := wnaf5(&kl)
+		digits, top := wnafVartime(&kl, 5)
+		wantTop := -1
+		for i := range digits {
+			if digits[i] != 0 {
+				wantTop = i
+			}
+		}
+		if top != wantTop {
+			t.Fatalf("wNAF top %d, want %d", top, wantTop)
+		}
 		// Reconstruct k = Σ d_i·2^i and check the NAF properties.
 		sum := new(big.Int)
 		last := -10
@@ -233,5 +242,77 @@ func TestWNAFAndVartimeCombination(t *testing.T) {
 	linearCombinationVartime(&got, &u1, &u2, &generator)
 	if got.isIdentity() != 1 {
 		t.Fatal("5G + (n-5)G != identity")
+	}
+}
+
+// addMixed agrees with the complete projective addition for every case
+// its contract allows: p is any point (identity, q, -q, random, scaled
+// projective coordinates); q is affine and not the identity.
+func TestAddMixedMatchesCompleteAddition(t *testing.T) {
+	rng := rand.New(rand.NewSource(60))
+	randPoint := func() point {
+		var k scalar
+		var b [32]byte
+		rng.Read(b[:])
+		k.setBytesReduced(&b)
+		var p point
+		return *p.scalarMult(&k, &generator)
+	}
+	for i := 0; i < 300; i++ {
+		q := randPoint()
+		qx, qy, _ := q.affine()
+		qa := affinePoint{qx, qy}
+		var qneg point
+		qneg.neg(&q)
+		var ident point
+		ident.setIdentity()
+		// A scaled representation of q: (λX : λY : λZ).
+		var lam fieldElement
+		var lb [32]byte
+		rng.Read(lb[:])
+		lb[0] &= 0x7f
+		lam.setBytes(&lb)
+		scaled := q
+		scaled.x.mul(&scaled.x, &lam)
+		scaled.y.mul(&scaled.y, &lam)
+		scaled.z.mul(&scaled.z, &lam)
+		for _, p := range []point{randPoint(), q, qneg, ident, scaled} {
+			var want, got point
+			want.add(&p, &q)
+			got.addMixed(&p, &qa)
+			if got.equal(&want) != 1 {
+				t.Fatalf("case %d: addMixed differs from add", i)
+			}
+		}
+	}
+}
+
+// The signed radix-32 digits reconstruct the scalar.
+func TestBoothDigits(t *testing.T) {
+	rng := rand.New(rand.NewSource(61))
+	vals := []*big.Int{big.NewInt(0), big.NewInt(1), big.NewInt(16), big.NewInt(17), big.NewInt(31), big.NewInt(32),
+		new(big.Int).Sub(bigN, big.NewInt(1)), new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))}
+	for i := 0; i < 1000; i++ {
+		var b [32]byte
+		rng.Read(b[:])
+		vals = append(vals, new(big.Int).SetBytes(b[:]))
+	}
+	for _, v := range vals {
+		k := limbsFromBytes(to32(v))
+		sum := new(big.Int)
+		for w := baseWindows - 1; w >= 0; w-- {
+			mag, neg := boothDigit(&k, w)
+			if mag > 16 || neg > 1 {
+				t.Fatal("digit out of range")
+			}
+			d := big.NewInt(int64(mag))
+			if neg == 1 {
+				d.Neg(d)
+			}
+			sum.Lsh(sum, 5).Add(sum, d)
+		}
+		if sum.Cmp(v) != 0 {
+			t.Fatalf("Booth digits of %x reconstruct %x", v, sum)
+		}
 	}
 }

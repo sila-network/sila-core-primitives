@@ -65,6 +65,9 @@ jobs:
           go test -count=1 -race ./...
           go test -count=1 -race -tags purego ./...
 
+      - name: secp256k1 compiled-code constant-time check (no conditional branches in constant-time functions)
+        run: SILA_CT_OBJDUMP=1 go test -count=1 -run 'TestCompiled' -v ./secp256k1 | grep -E '^(---|ok|FAIL)|branch'
+
       - name: Generated kernels are up to date
         run: |
           (cd keccak && go generate)
@@ -105,6 +108,12 @@ jobs:
               GOARCH=$arch go test -c -o "$RUNNER_TEMP/$pkg.$arch" "./$pkg"
               (cd "$pkg" && "$emu" "$RUNNER_TEMP/$pkg.$arch" -test.short -test.count=1 -test.v | grep -E '^(--- |PASS|FAIL|ok)')
             done
+          done
+      - name: secp256k1 compiled-code constant-time check (386, ppc64le, riscv64 machine code)
+        run: |
+          for arch in 386 ppc64le riscv64; do
+            echo "== $arch"
+            SILA_CT_OBJDUMP=1 SILA_CT_GOARCH=$arch go test -count=1 -run 'TestCompiled' -v ./secp256k1 | grep -E '^(---|ok|FAIL)|branch'
           done
       - name: loong64 (build and vet only; no emulator on the runner image)
         run: GOARCH=loong64 go vet ./... && GOARCH=loong64 go test -c -o /dev/null ./keccak && GOARCH=loong64 go test -c -o /dev/null ./secp256k1 && GOARCH=loong64 go test -c -o /dev/null ./txsig

@@ -194,6 +194,17 @@ The random-vs-random controls themselves reach |t| = 10–120 and sometimes
 keep one sign over 5 runs (e.g. +1.78..+4.75), so these runners cannot
 resolve effects below roughly |t| ≈ 10.
 
+**Final code (e54f799: masked nonce, masked key, shared numerator,
+counterbalanced harness).** 6 jobs: 2 amd64, 2 Linux arm64 (no DIT),
+2 macOS arm64 (Apple Silicon, FEAT_DIT enabled by Sign and PublicKey).
+All production paths (masked inverse, masked k·G, Sign, PublicKey) passed in
+all 6 jobs. Below the criterion, one amd64 job showed PublicKey with five
+positive values (+0.35..+5.70) and Sign 4 of 5 positive, while its
+controls had mixed signs; the macOS (DIT) jobs showed no same-sign series.
+Counterbalancing removed a positional bias of the harness that had made a
+test and its control fail together on one amd64 runner (masked k·G
++4.66..+16.80, control +2.84..+9.37 on ce336ed).
+
 **Closure.** S-8 is mitigated by construction (the secret never reaches a
 multiplication unmasked) and the production paths pass on shared runners,
 but it is **not closed**: (a) the shared runners are too noisy to give

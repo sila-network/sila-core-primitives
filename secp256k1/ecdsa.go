@@ -243,7 +243,14 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 		if !nonces.next(&k) {
 			continue // candidate outside [1, n-1]: try the next one
 		}
-		sig, ok := signWithNonce(&priv.d, &z, &k)
+		// Per-signature inversion blinding rho, derived from the secret
+		// RFC 6979 key K with a domain-separated message; it does not
+		// change the RFC 6979 candidate sequence.
+		rho, _ := derivedBlinding(&nonces.k, 'I', false)
+		sig, ok := signWithNonce(&priv.d, &z, &k, &rho, func() (scalar, point) {
+			return derivedBlinding(&nonces.k, 'B', true)
+		})
+		rho.zero()
 		k.zero()
 		if ok {
 			return sig
@@ -254,9 +261,9 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 // signWithNonce computes (r, s, v) for a given nonce k. It returns false
 // if r or s is zero (probability about 2^-256), in which case the caller
 // continues with the next nonce.
-func signWithNonce(d, z, k *scalar) (Signature, bool) {
+func signWithNonce(d, z, k, rho *scalar, fallback func() (scalar, point)) (Signature, bool) {
 	var R point
-	R.scalarBaseMult(k)
+	R.scalarBaseMultBlinded(k, fallback)
 	x, y, _ := R.affine()
 	xb := x.bytes()
 
@@ -272,7 +279,7 @@ func signWithNonce(d, z, k *scalar) (Signature, bool) {
 
 	// s = k^-1 (z + r·d) mod n.
 	var s, kinv, rd scalar
-	kinv.inv(k)
+	kinv.invBlinded(k, rho)
 	rd.mul(&r, d)
 	s.add(z, &rd)
 	s.mul(&s, &kinv)

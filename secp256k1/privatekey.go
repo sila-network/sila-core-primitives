@@ -84,7 +84,11 @@ func (k *PrivateKey) PublicKey() (PublicKey, error) {
 	var err error
 	withDIT(func() {
 		var p point
-		p.scalarBaseMult(&k.d)
+		p.scalarBaseMultBlinded(&k.d, func() (scalar, point) {
+			seed := k.d.bytes()
+			defer clear(seed[:])
+			return derivedBlinding(&seed, 'P', true)
+		})
 		pub, err = publicKeyFromPoint(&p)
 	})
 	return pub, err

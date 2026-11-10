@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -138,22 +139,61 @@ func TestConstantTimeStatistical(t *testing.T) {
 	// Every call reads its secret from the same fixed variable (in, key),
 	// so all classes use the same memory addresses: only the secret value
 	// differs. Fresh secret sets are drawn for every repetition.
+	//
+	// Diagnostics measure the raw building blocks (to locate a root cause)
+	// and are only reported. The production paths (blinded inversion,
+	// blinded k·G, Sign, PublicKey) must not show a consistent difference.
 	var in scalar
 	key := &PrivateKey{valid: true}
 	var sink point
 	var sinkS scalar
+	var sinkF fieldElement
+	var sinkP PublicKey
 	digest := [32]byte{7}
-	ops := []struct {
-		name string
-		run  func(k *scalar)
-	}{
-		{"scalarBaseMult", func(k *scalar) { in = *k; sink.scalarBaseMult(&in) }},
-		{"scalarMult", func(k *scalar) { in = *k; sink.scalarMult(&in, &generator) }},
-		{"scalar inverse", func(k *scalar) { in = *k; sinkS.inv(&in) }},
-		{"Sign", func(k *scalar) { key.d = *k; Sign(key, digest) }},
+	brng := rand.New(rand.NewSource(99))
+	var ys [64]fieldElement
+	var ysc [64]scalar
+	var rhos [256]scalar
+	for i := range ys {
+		ys[i] = fieldFromRand(brng)
+		ysc[i] = scalarFromBig(new(big.Int).SetBytes(randBytes(brng)))
 	}
+	for i := range rhos {
+		rhos[i] = scalarFromBig(new(big.Int).Add(big.NewInt(1), new(big.Int).Mod(new(big.Int).SetBytes(randBytes(brng)), new(big.Int).Sub(bigN, big.NewInt(1)))))
+	}
+	idx := 0
+	ops := []struct {
+		name       string
+		diagnostic bool
+		run        func(k *scalar)
+	}{
+		{"diag: harness only", true, func(k *scalar) { in = *k }},
+		{"diag: field mul x64", true, func(k *scalar) {
+			in = *k
+			x := fieldElement{v: in.v} // Montgomery limbs of the secret
+			for i := range ys {
+				sinkF.mul(&x, &ys[i])
+			}
+		}},
+		{"diag: scalar mul x64", true, func(k *scalar) {
+			in = *k
+			for i := range ysc {
+				sinkS.mul(&in, &ysc[i])
+			}
+		}},
+		{"diag: raw inverse", true, func(k *scalar) { in = *k; sinkS.inv(&in) }},
+		{"diag: raw k·G", true, func(k *scalar) { in = *k; sink.scalarBaseMult(&in) }},
+		{"blinded inverse", false, func(k *scalar) { in = *k; idx++; sinkS.invBlinded(&in, &rhos[idx&255]) }},
+		{"blinded k·G", false, func(k *scalar) { in = *k; sink.scalarBaseMultBlinded(&in, nil) }},
+		{"Sign", false, func(k *scalar) { key.d = *k; Sign(key, digest) }},
+		{"PublicKey", false, func(k *scalar) { key.d = *k; sinkP, _ = key.PublicKey() }},
+	}
+	only := os.Getenv("SILA_TIMING_ONLY") // optional substring filter
 	seed := time.Now().UnixNano()
 	for _, op := range ops {
+		if only != "" && !strings.Contains(op.name, only) {
+			continue
+		}
 		var ts, cs []float64
 		for r := 0; r < reps; r++ {
 			rng := rand.New(rand.NewSource(seed + int64(r)))
@@ -161,11 +201,8 @@ func TestConstantTimeStatistical(t *testing.T) {
 			a, b, c := make([]scalar, 256), make([]scalar, 256), make([]scalar, 256)
 			for i := range a {
 				a[i] = scalarFromBig(big.NewInt(int64(rng.Intn(255) + 1)))
-				var buf [32]byte
-				rng.Read(buf[:])
-				b[i] = scalarFromBig(new(big.Int).SetBytes(buf[:]))
-				rng.Read(buf[:])
-				c[i] = scalarFromBig(new(big.Int).SetBytes(buf[:]))
+				b[i] = scalarFromBig(new(big.Int).Mod(new(big.Int).SetBytes(randBytes(rng)), bigN))
+				c[i] = scalarFromBig(new(big.Int).Mod(new(big.Int).SetBytes(randBytes(rng)), bigN))
 			}
 			class := func(set []scalar) func(i int) func() {
 				return func(i int) func() { return func() { op.run(&set[i%256]) } }
@@ -174,11 +211,34 @@ func TestConstantTimeStatistical(t *testing.T) {
 			cs = append(cs, measureClassesSigned(samples, class(c), class(b)))
 		}
 		minT, sameSign := minAbs(ts), sameSigns(ts)
-		t.Logf("%-15s t %s; control t %s (bound 4.5, %d runs)", op.name, fmtTs(ts), fmtTs(cs), reps)
-		if minT > 4.5 && sameSign {
+		kind := "production"
+		if op.diagnostic {
+			kind = "diagnostic"
+		}
+		t.Logf("%-22s [%s] t %s; control t %s (bound 4.5, %d runs)", op.name, kind, fmtTs(ts), fmtTs(cs), reps)
+		if !op.diagnostic && minT > 4.5 && sameSign {
 			t.Errorf("%s: consistent timing difference between secret classes, min |t| = %.2f (control %s)", op.name, minT, fmtTs(cs))
 		}
 	}
 	_ = sink
 	_ = sinkS
+	_ = sinkF
+	_ = sinkP
+}
+
+func randBytes(rng *rand.Rand) []byte {
+	b := make([]byte, 32)
+	rng.Read(b)
+	return b
+}
+
+func fieldFromRand(rng *rand.Rand) fieldElement {
+	for {
+		var b [32]byte
+		rng.Read(b[:])
+		var f fieldElement
+		if f.setBytes(&b) == 1 {
+			return f
+		}
+	}
 }

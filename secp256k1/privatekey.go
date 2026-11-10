@@ -21,9 +21,14 @@ const PrivateKeySize = 32
 // note that Go cannot guarantee that no other copy exists in memory (for
 // example after the garbage collector moved it, or in the caller's
 // buffers), so this is best-effort hygiene, not a guarantee.
+//
+// The key is stored masked as two shares, d = d1 + d2 (mod n), with d1
+// random (finding S-8): multiplications only ever see the uniformly random
+// shares, never d itself, so value-dependent instruction timing in the
+// processor cannot depend on d.
 type PrivateKey struct {
-	d     scalar
-	valid bool
+	d1, d2 scalar // Montgomery form; d = d1 + d2 mod n
+	valid  bool
 }
 
 // ParsePrivateKey decodes a 32-byte big-endian scalar. It rejects zero,
@@ -33,15 +38,66 @@ func ParsePrivateKey(b []byte) (*PrivateKey, error) {
 	if len(b) != PrivateKeySize {
 		return nil, ErrInvalidPrivateKey
 	}
-	k := new(PrivateKey)
-	ok := k.d.setBytesCanonical((*[32]byte)(b))
-	ok &= 1 ^ k.d.isZero()
+	d := limbsFromBytes((*[32]byte)(b))
+	defer clear(d[:])
+	ok := lessThan(&d, &scalarN.m) & (1 ^ isZeroLimbs(&d))
 	if ok != 1 {
-		k.d.zero()
 		return nil, ErrInvalidPrivateKey
 	}
+	k := new(PrivateKey)
+	k.setShares(&d)
 	k.valid = true
 	return k, nil
+}
+
+// setShares stores the canonical value d (< n) as random shares. The
+// shares are formed in the canonical domain with a modular subtraction
+// (no multiplication involves d); each share is then converted to
+// Montgomery form, which multiplies only uniformly random values.
+func (k *PrivateKey) setShares(d *limbs) {
+	var m limbs
+	var mb [32]byte
+	if _, err := io.ReadFull(rand.Reader, mb[:]); err == nil {
+		m = limbsFromBytes(&mb)
+		scalarN.reduceOnce(&m, &m, 0) // any 256-bit value is < 2n
+	} else {
+		// No randomness: derive the mask from d itself (secret, pseudo-random).
+		var db [32]byte
+		limbsToBytes(&db, d)
+		h := hmacSHA256(&db, []byte("SILA-secp256k1-key-mask"))
+		m = limbsFromBytes(&h)
+		scalarN.reduceOnce(&m, &m, 0)
+		clear(db[:])
+		clear(h[:])
+	}
+	clear(mb[:])
+	var r limbs
+	scalarN.sub(&r, d, &m) // d2 = d - d1 mod n
+	scalarN.toMont(&k.d1.v, &m)
+	scalarN.toMont(&k.d2.v, &r)
+	clear(m[:])
+	clear(r[:])
+}
+
+// canonicalD returns d = d1 + d2 mod n in canonical limbs: each share is
+// converted out of Montgomery form (multiplying random values), and the
+// shares are added (an addition, not a multiplication, produces d).
+func (k *PrivateKey) canonicalD() limbs {
+	a, b := k.d1.canonical(), k.d2.canonical()
+	var d limbs
+	scalarN.add(&d, &a, &b)
+	clear(a[:])
+	clear(b[:])
+	return d
+}
+
+// dBytes returns the 32-byte big-endian encoding of d.
+func (k *PrivateKey) dBytes() [32]byte {
+	d := k.canonicalD()
+	var out [32]byte
+	limbsToBytes(&out, &d)
+	clear(d[:])
+	return out
 }
 
 // GeneratePrivateKey returns a uniformly random private key, reading from
@@ -72,7 +128,7 @@ func (k *PrivateKey) Bytes() ([32]byte, error) {
 	if k == nil || !k.valid {
 		return [32]byte{}, ErrInvalidPrivateKey
 	}
-	return k.d.bytes(), nil
+	return k.dBytes(), nil
 }
 
 // PublicKey returns d·G, computed in constant time.
@@ -84,8 +140,8 @@ func (k *PrivateKey) PublicKey() (PublicKey, error) {
 	var err error
 	withDIT(func() {
 		var p point
-		p.scalarBaseMultBlinded(&k.d, func() (scalar, point) {
-			seed := k.d.bytes()
+		p.scalarBaseMultShares(&k.d1, &k.d2, func() (scalar, point) {
+			seed := k.dBytes()
 			defer clear(seed[:])
 			return derivedBlinding(&seed, 'P', true)
 		})
@@ -99,6 +155,7 @@ func (k *PrivateKey) Zero() {
 	if k == nil {
 		return
 	}
-	k.d.zero()
+	k.d1.zero()
+	k.d2.zero()
 	k.valid = false
 }

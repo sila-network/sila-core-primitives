@@ -236,7 +236,9 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 	var z scalar
 	z.setBytesReduced(digest)
 
-	nonces := newRFC6979(&priv.d, &z, extra)
+	x := priv.dBytes() // int2octets(d), rebuilt from the shares
+	nonces := newRFC6979(&x, &z, extra)
+	clear(x[:])
 	defer nonces.wipe()
 	for {
 		var k scalar
@@ -247,7 +249,7 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 		// RFC 6979 key K with a domain-separated message; it does not
 		// change the RFC 6979 candidate sequence.
 		rho, _ := derivedBlinding(&nonces.k, 'I', false)
-		sig, ok := signWithNonce(&priv.d, &z, &k, &rho, func() (scalar, point) {
+		sig, ok := signWithNonce(&priv.d1, &priv.d2, &z, &k, &rho, func() (scalar, point) {
 			return derivedBlinding(&nonces.k, 'B', true)
 		})
 		rho.zero()
@@ -261,7 +263,7 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 // signWithNonce computes (r, s, v) for a given nonce k. It returns false
 // if r or s is zero (probability about 2^-256), in which case the caller
 // continues with the next nonce.
-func signWithNonce(d, z, k, rho *scalar, fallback func() (scalar, point)) (Signature, bool) {
+func signWithNonce(d1, d2, z, k, rho *scalar, fallback func() (scalar, point)) (Signature, bool) {
 	var R point
 	R.scalarBaseMultBlinded(k, fallback)
 	x, y, _ := R.affine()
@@ -277,11 +279,15 @@ func signWithNonce(d, z, k, rho *scalar, fallback func() (scalar, point)) (Signa
 		return Signature{}, false
 	}
 
-	// s = k^-1 (z + r·d) mod n.
-	var s, kinv, rd scalar
+	// s = k^-1 (z + r·d) mod n, with r·d = r·d1 + r·d2 (the shares of
+	// the masked private key; d itself never enters a multiplication).
+	var s, kinv, rd, rd2 scalar
 	kinv.invBlinded(k, rho)
-	rd.mul(&r, d)
+	rd.mul(&r, d1)
+	rd2.mul(&r, d2)
 	s.add(z, &rd)
+	s.add(&s, &rd2)
+	rd2.zero()
 	s.mul(&s, &kinv)
 	kinv.zero()
 	rd.zero()
@@ -403,12 +409,12 @@ type rfc6979 struct {
 	more bool
 }
 
-func newRFC6979(d, z *scalar, extra *[ExtraEntropySize]byte) rfc6979 {
+func newRFC6979(x *[32]byte, z *scalar, extra *[ExtraEntropySize]byte) rfc6979 {
 	var g rfc6979
 	for i := range g.v {
 		g.v[i] = 0x01
 	}
-	x := d.bytes()  // int2octets(d)
+	// x is int2octets(d).
 	h1 := z.bytes() // bits2octets(digest) = digest mod n
 	var data []byte
 	if extra != nil {
@@ -418,7 +424,6 @@ func newRFC6979(d, z *scalar, extra *[ExtraEntropySize]byte) rfc6979 {
 	g.v = hmacSHA256(&g.k, g.v[:])                                  // step e
 	g.k = hmacSHA256(&g.k, g.v[:], []byte{0x01}, x[:], h1[:], data) // step f
 	g.v = hmacSHA256(&g.k, g.v[:])                                  // step g
-	clear(x[:])
 	return g
 }
 

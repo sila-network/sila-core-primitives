@@ -89,6 +89,7 @@ Enforced by tests:
 | S-4 | An unchecked assumption about digests ≥ n | Measured; documented in the contract | `TestSecp256k1DigestAboveOrder` |
 | S-5 | High-S handling was one rule for all contexts; raw recovery must accept high-S, transactions must not | Strict and recovery-compatible parsers; `txsig` rules; `Verify` stays strict | `TestHighSContexts`, `TestParityRawRecovery`, `TestParityValidateSignatureValues` |
 | S-6 | Branch-free source does not guarantee branch-free machine code | Compiled-code check in CI on five architectures | `TestCompiledConstantTimeFunctions` |
+| S-8 | Value-dependent timing for extreme secrets on shared runners (inversion, k·G) | Blinded nonce inversion, blinded fixed-base multiplication, masked private key; corrected timing harness | `TestBlinded*`, `TestPrivateKeyShares`, `TestConstantTimeStatistical` (§6.1); **mitigated, not closed** |
 | S-7 | During the optimization round, one timing session showed \|t\| = 5.5 for k·G | Re-measured with 5× more samples and a random-vs-random control: \|t\| did not grow, and the control reached the same level (see §6) | `TestConstantTimeStatistical` (control class) |
 
 ## 5. Correctness evidence
@@ -127,37 +128,75 @@ the same level. **No leak was detected above the noise of this shared VM.**
 This cannot rule out smaller leaks or micro-architectural channels
 (cache, port contention) that wall-clock timing does not show.
 
-### 6.1 GitHub runners (commit 05622d6, open finding S-8)
+### 6.1 Finding S-8 — value-dependent timing on shared runners
 
-The improved test (one fixed input address, fresh secret sets per run,
-signed t, random-vs-random control per operation; 100k samples, 5 runs)
-on shared GitHub runners, neither of which reports FEAT_DIT:
+**Status: mitigated; NOT closed for production** (see "closure" below).
 
-| Runner | Operation | tiny vs random t (5 runs) | control t |
-|---|---|---|---|
-| amd64 | scalar inverse | +12.83, +56.99, +10.86, +9.25, +11.97 | +1.90, +1.79, −1.21, −0.86, +2.66 |
-| arm64 | k·G | −12.38, −11.76, −6.82, −9.12, −7.89 | −2.65, +6.00, −1.90, −0.56, +1.70 |
-| amd64, arm64 | Sign (end to end) | below the bound, mixed signs | — |
+**What was observed (05622d6).** On shared GitHub runners (no FEAT_DIT),
+scalar inversion (amd64, t +9.25..+56.99) and k·G (arm64, t −6.8..−12.4)
+were consistently slower/faster for tiny secrets (1..255, whose Montgomery
+form k·(2^256 mod n) has zero high limbs) than for random ones.
 
-**S-8 (open):** these are consistent, same-sign differences for an extreme
-secret class (values 1..255, whose Montgomery form has zero high limbs),
-larger than the controls, so they are not explained by noise. The compiled
-code of these functions has no data-dependent branch or memory access
-(§3), so the difference comes from the processor's handling of operand
-values (data-dependent instruction timing or power/frequency effects).
-Nonces in `Sign` are uniform 256-bit values, and end-to-end `Sign` stayed
-below the bound, but a timing dependence on the nonce's value is not
-acceptable for production. Planned mitigations (not yet implemented):
-blind the nonce inversion (invert k·b for a secret uniform b derived from
-the RFC 6979 state, then multiply by b), randomize the projective
-coordinates of the k·G accumulator, and repeat the measurement on
-dedicated amd64 and arm64 hardware with DIT available.
+**Root-cause analysis.**
+1. *Code and compiled code:* no secret-dependent branch or memory access
+   (the compiled-code check passes on amd64, arm64, 386, ppc64le,
+   riscv64). The functions execute the same instruction stream for every
+   input.
+2. *Measurement artefact (proven and fixed):* the timing harness copied the
+   secret from its class's array inside the timed region, so the memory
+   placement of each class entered the timing. On one amd64 runner this
+   made two **random** classes differ consistently (copy-only control
+   t = 44..122; blinded-inverse control ≈ +5.5 in every run). Since
+   1a6e7ca the secret is loaded outside the timed region.
+3. *Processor behaviour (reproduced with the corrected harness):* the raw,
+   unblinded inversion still shows consistent same-sign differences for
+   tiny secrets on some runner instances while the per-operation controls
+   do not: amd64 t = +46.03, +37.79, +19.98, +34.28, +42.38 (control
+   −6.69..+0.28); arm64 t = +22.01, +3.45, +1.03, +0.65, +11.45 (control
+   −0.21..+2.93); another amd64 instance −1.29..−4.55. With identical
+   instruction streams, the remaining explanation is value-dependent
+   timing in the processor (data-dependent instruction latency or
+   power/frequency effects), which neither x86 without DOIT nor Arm without
+   DIT rules out. The exact micro-architectural mechanism was not
+   identified; it varies between runner instances.
+
+**Fix (724ef8e, 1a6e7ca, and the private-key masking commit).** Make every
+value that reaches a multiplication statistically independent of the
+secret, whatever the processor does:
+- nonce inversion: (k·ρ)⁻¹·ρ with a per-signature secret ρ derived from
+  the RFC 6979 key K (domain-separated HMAC; the candidate sequence is
+  unchanged);
+- k·G and d·G: (k + b)·G + (−b·G) with a secret process-wide b
+  (crypto/rand; `RefreshBlinding`; derived per-call fallback);
+- private key: stored as random shares d = d1 + d2; r·d = r·d1 + r·d2, and
+  int2octets(d) and the public key are rebuilt by additions only, so d is
+  never a multiplication operand;
+- unchanged results: signatures stay byte-identical to deterministic
+  RFC 6979 (all parity tests), 0 allocations; Sign +3 µs.
+
+**Evidence after the fix** (corrected harness, 100k samples × 5 runs per
+job, production paths must not show the same sign in all runs with
+|t| > 4.5): 6 jobs on shared runners (3 amd64, 3 arm64) — blinded
+inversion, blinded k·G, Sign and PublicKey passed in every job, while the
+raw inversion reproduced the effect in 3 of the 6 jobs. One amd64 job showed
+Sign with tiny private keys at t = −1.77, −5.68, −1.62, −5.01, −6.09 (below
+the criterion, same sign); this measurement predates the private-key
+masking, which removes the two remaining multiplications by d.
+
+**Closure.** S-8 is mitigated by construction (the secret never reaches a
+multiplication unmasked) and the production paths pass on shared runners,
+but it is **not closed**: (a) the shared runners are too noisy to give
+strong repeated evidence (controls reach |t| = 20–120 in some runs); (b) no
+dedicated, quiet amd64 and arm64 hardware with DIT/DOIT was available;
+(c) the masking commit has fewer runner measurements than the earlier
+fixes. Required to close: millions of samples on dedicated hardware for
+each target CPU, including the masked Sign and PublicKey paths.
 
 ## 7. Residual risks (must be resolved or accepted before production)
 
-0. **Open timing finding S-8** (§6.1): consistent timing differences for
-   extreme secret classes in scalar inversion (amd64 runner) and k·G
-   (arm64 runner). Blocks production use until mitigated and re-measured.
+0. **Timing finding S-8 — mitigated, not closed** (§6.1): processor
+   value-dependent timing on shared runners; blinding and key masking are
+   in place; closing needs dedicated-hardware measurements.
 1. **No independent audit** of the arithmetic, the formulas, the GLV code
    or the constant-time claims.
 2. **Timing evidence is limited** to a shared VM. Needed: millions of

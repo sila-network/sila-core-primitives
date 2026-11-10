@@ -253,7 +253,7 @@ func TestPrivateKeyValidation(t *testing.T) {
 	if _, err := Sign(k, [32]byte{}); err == nil {
 		t.Fatal("zeroed key signed")
 	}
-	if k.d.v != (limbs{}) {
+	if k.d1.v != (limbs{}) || k.d2.v != (limbs{}) {
 		t.Fatal("scalar not overwritten")
 	}
 	var nilKey *PrivateKey

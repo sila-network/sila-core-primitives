@@ -113,6 +113,25 @@ func (r *point) scalarBaseMultBlinded(k *scalar, fallback func() (scalar, point)
 	return r
 }
 
+// scalarBaseMultShares sets r = (s1 + s2)·G for a secret given as two
+// shares, computing ((s1 + b) + s2)·G + (−b·G): no intermediate value
+// equals the secret (constant time).
+func (r *point) scalarBaseMultShares(s1, s2 *scalar, fallback func() (scalar, point)) *point {
+	var b scalar
+	var negB point
+	if bl := currentBlinding(); bl != nil {
+		b, negB = bl.b, bl.negB
+	} else {
+		b, negB = fallback()
+	}
+	var t scalar
+	t.add(s1, &b)
+	r.scalarBaseMultWith(s2, &t, &negB)
+	t.zero()
+	b.zero()
+	return r
+}
+
 // scalarBaseMultWith sets r = (k + b)·G + negB, which is k·G when
 // negB = −b·G (constant time; complete formulas, so k + b = 0 is fine).
 func (r *point) scalarBaseMultWith(k, b *scalar, negB *point) *point {

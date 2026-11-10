@@ -163,7 +163,12 @@ func TestConstantTimeStatistical(t *testing.T) {
 	}
 	idx := 0
 	// load copies the secret into the fixed inputs (untimed); run is timed.
-	loadScalar := func(k *scalar) { in = *k; key.d = *k; idx++ }
+	loadScalar := func(k *scalar) {
+		in = *k
+		c := k.canonical()
+		key.setShares(&c) // fresh random shares, as ParsePrivateKey does
+		idx++
+	}
 	ops := []struct {
 		name       string
 		diagnostic bool

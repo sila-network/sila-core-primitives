@@ -47,6 +47,23 @@ algorithm, where SILA uses fixed addition chains. Closing the gap in Go
 would need assembly field arithmetic per architecture (a large new review
 surface) or the items below; it is documented, not hidden.
 
+## After the S-8 side-channel fix (2026-11-10)
+
+Same VM and method, 8 pinned runs (raw data:
+`benchmarks/geth-compare/results/local-2026-11-10-secp256k1-s8/`, measured
+with the blinding; the later private-key masking adds one scalar
+multiplication, about 0.03 µs):
+
+| Operation | SILA before | SILA after | libsecp256k1 | decred |
+|---|---:|---:|---:|---:|
+| Sign | 33.55 µs | 36.49 µs ±7 % | 29.55 µs | 41.13 µs |
+| Verify | 59.32 µs | 61.39 µs ±5 % | 41.72 µs | 146.36 µs |
+| Recover | 69.07 µs | 69.49 µs ±8 % | 48.66 µs | 175.11 µs |
+| Public key | 22.94 µs | 24.24 µs ±5 % | — | 36.21 µs |
+
+Allocations stay at 0 for every operation. Signing is still faster than
+decred (1.13×); the blinding costs about 3 µs per signature.
+
 ## Where the time goes (reference VM, in-package benchmarks)
 
 | Building block | Before | After |

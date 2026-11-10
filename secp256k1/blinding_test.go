@@ -130,3 +130,55 @@ func TestRefreshBlindingKeepsSignaturesAndIsConcurrent(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+// Masked private keys: the shares are random (they differ between two
+// parses of the same key), they always add up to d, and every operation
+// returns the same result as before masking.
+func TestPrivateKeyShares(t *testing.T) {
+	rng := rand.New(rand.NewSource(83))
+	for _, d := range interesting(rng, bigN, 200) {
+		if d.Sign() == 0 {
+			continue
+		}
+		b := to32(d)
+		k1, err := ParsePrivateKey(b[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		k2, _ := ParsePrivateKey(b[:])
+		if k1.d1 == k2.d1 {
+			t.Fatal("mask is not random")
+		}
+		got, _ := k1.Bytes()
+		if got != *b {
+			t.Fatalf("shares do not recombine to %x", d)
+		}
+		var sum scalar
+		sum.add(&k1.d1, &k1.d2)
+		if sum != scalarFromBig(d) {
+			t.Fatal("d1 + d2 != d")
+		}
+		p1, _ := k1.PublicKey()
+		p2, _ := k2.PublicKey()
+		var want point
+		ds := scalarFromBig(d)
+		want.scalarBaseMult(&ds)
+		wp, _ := publicKeyFromPoint(&want)
+		if !p1.Equal(wp) || !p2.Equal(wp) {
+			t.Fatal("public key differs")
+		}
+		digest := sha256.Sum256(b[:])
+		s1, _ := Sign(k1, digest)
+		s2, _ := Sign(k2, digest)
+		if s1 != s2 {
+			t.Fatal("signature depends on the mask")
+		}
+	}
+	// A derived mask is used when no randomness is available.
+	var k PrivateKey
+	c := limbs{5, 0, 0, 0}
+	k.setShares(&c)
+	if got := k.canonicalD(); got != c {
+		t.Fatal("shares do not recombine")
+	}
+}

@@ -174,22 +174,29 @@ secret, whatever the processor does:
 - unchanged results: signatures stay byte-identical to deterministic
   RFC 6979 (all parity tests), 0 allocations; Sign +3 µs.
 
-**Evidence after the fix** (corrected harness, 100k samples × 5 runs per
-job, production paths must not show the same sign in all runs with
-|t| > 4.5): 6 jobs on shared runners (3 amd64, 3 arm64) — blinded
-inversion, blinded k·G, Sign and PublicKey passed in every job, while the
-raw inversion reproduced the effect in 3 of the 6 jobs. One amd64 job showed
-Sign with tiny private keys at t = −1.77, −5.68, −1.62, −5.01, −6.09 (below
-the criterion, same sign); this measurement predates the private-key
-masking, which removes the two remaining multiplications by d.
+**Evidence after the fix** (corrected harness since 1a6e7ca; 100k samples
+× 5 runs per job; a production path fails when all 5 runs exceed
+|t| = 4.5 with the same sign). 10 jobs on shared GitHub runners (5 amd64,
+5 arm64; commits 1a6e7ca, a re-run, and f4ff94b with the masked key):
+
+| Path | Jobs meeting the failure criterion | Notes |
+|---|---|---|
+| raw inversion (diagnostic, unblinded) | 1 of 10 by the criterion; 3 of 10 with all 5 runs on one side | clean-control cases: amd64 +19.98..+46.03, arm64 +0.65..+22.01 |
+| blinded inversion | 0 of 10 | |
+| blinded k·G | 0 of 10 | two arm64 jobs had all-positive t (0.84..11.67), below the criterion |
+| Sign | 0 of 10 | one pre-masking amd64 job had all-negative t (−1.62..−6.09) |
+| PublicKey | 0 of 10 | one arm64 job all-positive (1.39..9.17) with a control of the same size (−6.16..8.66) |
+
+The random-vs-random controls themselves reach |t| = 10–120 and sometimes
+keep one sign over 5 runs (e.g. +1.78..+4.75), so these runners cannot
+resolve effects below roughly |t| ≈ 10.
 
 **Closure.** S-8 is mitigated by construction (the secret never reaches a
 multiplication unmasked) and the production paths pass on shared runners,
 but it is **not closed**: (a) the shared runners are too noisy to give
 strong repeated evidence (controls reach |t| = 20–120 in some runs); (b) no
 dedicated, quiet amd64 and arm64 hardware with DIT/DOIT was available;
-(c) the masking commit has fewer runner measurements than the earlier
-fixes. Required to close: millions of samples on dedicated hardware for
+(c) the masking commit has 4 runner jobs so far. Required to close: millions of samples on dedicated hardware for
 each target CPU, including the masked Sign and PublicKey paths.
 
 ## 7. Residual risks (must be resolved or accepted before production)

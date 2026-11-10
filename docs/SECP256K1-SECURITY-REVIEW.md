@@ -127,8 +127,37 @@ the same level. **No leak was detected above the noise of this shared VM.**
 This cannot rule out smaller leaks or micro-architectural channels
 (cache, port contention) that wall-clock timing does not show.
 
+### 6.1 GitHub runners (commit 05622d6, open finding S-8)
+
+The improved test (one fixed input address, fresh secret sets per run,
+signed t, random-vs-random control per operation; 100k samples, 5 runs)
+on shared GitHub runners, neither of which reports FEAT_DIT:
+
+| Runner | Operation | tiny vs random t (5 runs) | control t |
+|---|---|---|---|
+| amd64 | scalar inverse | +12.83, +56.99, +10.86, +9.25, +11.97 | +1.90, +1.79, −1.21, −0.86, +2.66 |
+| arm64 | k·G | −12.38, −11.76, −6.82, −9.12, −7.89 | −2.65, +6.00, −1.90, −0.56, +1.70 |
+| amd64, arm64 | Sign (end to end) | below the bound, mixed signs | — |
+
+**S-8 (open):** these are consistent, same-sign differences for an extreme
+secret class (values 1..255, whose Montgomery form has zero high limbs),
+larger than the controls, so they are not explained by noise. The compiled
+code of these functions has no data-dependent branch or memory access
+(§3), so the difference comes from the processor's handling of operand
+values (data-dependent instruction timing or power/frequency effects).
+Nonces in `Sign` are uniform 256-bit values, and end-to-end `Sign` stayed
+below the bound, but a timing dependence on the nonce's value is not
+acceptable for production. Planned mitigations (not yet implemented):
+blind the nonce inversion (invert k·b for a secret uniform b derived from
+the RFC 6979 state, then multiply by b), randomize the projective
+coordinates of the k·G accumulator, and repeat the measurement on
+dedicated amd64 and arm64 hardware with DIT available.
+
 ## 7. Residual risks (must be resolved or accepted before production)
 
+0. **Open timing finding S-8** (§6.1): consistent timing differences for
+   extreme secret classes in scalar inversion (amd64 runner) and k·G
+   (arm64 runner). Blocks production use until mitigated and re-measured.
 1. **No independent audit** of the arithmetic, the formulas, the GLV code
    or the constant-time claims.
 2. **Timing evidence is limited** to a shared VM. Needed: millions of

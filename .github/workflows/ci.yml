@@ -78,10 +78,13 @@ jobs:
 
       - name: Short fuzz (secp256k1)
         run: |
-          for f in FuzzPublicKeyRoundTrip FuzzParseAndVerifySignature FuzzSignVerifyRecover; do
-            go test -run '^$' -fuzz "^${f}\$" -fuzztime 15s ./secp256k1
-          done
-          go test -run '^$' -fuzz '^FuzzParseCompactYParity$' -fuzztime 15s ./txsig
+          # Execution counts instead of durations: a time-bounded run can end
+          # with a spurious "context deadline exceeded" when the deadline
+          # races with worker shutdown (Go toolchain behaviour).
+          go test -run '^$' -fuzz '^FuzzPublicKeyRoundTrip$' -fuzztime 500000x ./secp256k1
+          go test -run '^$' -fuzz '^FuzzParseAndVerifySignature$' -fuzztime 300000x ./secp256k1
+          go test -run '^$' -fuzz '^FuzzSignVerifyRecover$' -fuzztime 100000x ./secp256k1
+          go test -run '^$' -fuzz '^FuzzParseCompactYParity$' -fuzztime 1000000x ./txsig
 
   cross-arch:
     name: Other architectures (386 native; s390x big-endian, ppc64le, riscv64 under QEMU)

@@ -224,8 +224,16 @@ func TestConstantTimeStatistical(t *testing.T) {
 					}
 				}
 			}
-			ts = append(ts, measureClassesSigned(samples, pair(a, b), op.run))
-			cs = append(cs, measureClassesSigned(samples, pair(c, b), op.run))
+			// Counterbalanced: each comparison is measured in both class
+			// orders. A positional bias of the harness (the first class of a
+			// pair consistently slower or faster, seen on some runners in
+			// both the tests and the random-vs-random controls) has the same
+			// sign in both orders and cancels in the half-difference; a real
+			// value-dependent difference changes sign and is kept.
+			ts = append(ts, (measureClassesSigned(samples, pair(a, b), op.run)-
+				measureClassesSigned(samples, pair(b, a), op.run))/2)
+			cs = append(cs, (measureClassesSigned(samples, pair(c, b), op.run)-
+				measureClassesSigned(samples, pair(b, c), op.run))/2)
 		}
 		minT, sameSign := minAbs(ts), sameSigns(ts)
 		kind := "production"

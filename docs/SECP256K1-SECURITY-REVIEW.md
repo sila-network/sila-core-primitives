@@ -41,7 +41,7 @@ open protocol items are BLOCKERs in the contract (§7).
 | Secret | Where | Protection |
 |---|---|---|
 | Private key d | `PrivateKey.d` | Range check, d·G, r·d and serialization are constant time. No `math/big`. |
-| Nonce k | inside `sign` | RFC 6979 on stack buffers; k·G by the constant-time signed-digit base table; k⁻¹ by a fixed addition chain and a sliding window over the **public** exponent n − 2; k and k⁻¹ are overwritten after use. |
+| Nonce k | inside `sign` | RFC 6979 on stack buffers; the candidate is checked by comparisons and split into shares k1 + k2 (no multiplication on k); k·G by the blinded constant-time base table on the shares; the inversion processes k1·ρ + k2·ρ; k⁻¹ is never formed; shares overwritten after use. |
 | Extra entropy (hedged API) | `SignWithExtraEntropy`, `SignHedged` | Copied into the stack HMAC input, cleared after use. |
 | HMAC state (K, V) | `rfc6979` value on the stack | Fixed-size stack arrays, cleared. Sign makes 0 heap allocations (`TestSignDoesNotAllocate`, `TestSignHedged`). |
 
@@ -89,6 +89,7 @@ Enforced by tests:
 | S-4 | An unchecked assumption about digests ≥ n | Measured; documented in the contract | `TestSecp256k1DigestAboveOrder` |
 | S-5 | High-S handling was one rule for all contexts; raw recovery must accept high-S, transactions must not | Strict and recovery-compatible parsers; `txsig` rules; `Verify` stays strict | `TestHighSContexts`, `TestParityRawRecovery`, `TestParityValidateSignatureValues` |
 | S-6 | Branch-free source does not guarantee branch-free machine code | Compiled-code check in CI on five architectures | `TestCompiledConstantTimeFunctions` |
+| S-10 | Review finding (Codex, P1, 541fc86): the nonce still entered three multiplications unmasked — its Montgomery conversion in the RFC 6979 step, k·ρ in the blinded inversion, and the final multiplication by the reconstructed k⁻¹ — so the earlier claim "no multiplication takes k" was wrong | The nonce is created as shares k = k1 + k2 in the canonical domain (range check by comparison only); k·G = ((k1 + b) + k2)·G; s = (k1·ρ + k2·ρ)⁻¹ · (ρ·(z + r·d1 + r·d2)). Neither k, k⁻¹ nor d is ever a multiplication operand | `TestBlindedInverseMatchesPlain` (masked inverse), all parity tests byte-identical |
 | S-9 | Randomness failure paths: unbounded loop on a broken source; a zero source left the key unmasked; one failure disabled the process-wide blinding | Bounded draws; HMAC-derived key mask; retry instead of `sync.Once` | `TestBlindingWithoutRandomness`, `TestRefreshBlindingBounded` |
 | S-8 | Value-dependent timing for extreme secrets on shared runners (inversion, k·G) | Blinded nonce inversion, blinded fixed-base multiplication, masked private key; corrected timing harness | `TestBlinded*`, `TestPrivateKeyShares`, `TestConstantTimeStatistical` (§6.1); **mitigated, not closed** |
 | S-7 | During the optimization round, one timing session showed \|t\| = 5.5 for k·G | Re-measured with 5× more samples and a random-vs-random control: \|t\| did not grow, and the control reached the same level (see §6) | `TestConstantTimeStatistical` (control class) |
@@ -164,9 +165,10 @@ form k·(2^256 mod n) has zero high limbs) than for random ones.
 **Fix (724ef8e, 1a6e7ca, and the private-key masking commit).** Make every
 value that reaches a multiplication statistically independent of the
 secret, whatever the processor does:
-- nonce inversion: (k·ρ)⁻¹·ρ with a per-signature secret ρ derived from
-  the RFC 6979 key K (domain-separated HMAC; the candidate sequence is
-  unchanged);
+- nonce: created as shares k = k1 + k2 (S-10); s = (k1·ρ + k2·ρ)⁻¹ ·
+  (ρ·(z + r·d)) with a per-signature secret ρ derived from the RFC 6979
+  key K (domain-separated HMAC; the candidate sequence is unchanged), so
+  neither k nor k⁻¹ is a multiplication operand;
 - k·G and d·G: (k + b)·G + (−b·G) with a secret process-wide b
   (crypto/rand; `RefreshBlinding`; derived per-call fallback);
 - private key: stored as random shares d = d1 + d2; r·d = r·d1 + r·d2, and

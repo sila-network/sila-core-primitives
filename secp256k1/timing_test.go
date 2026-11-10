@@ -163,8 +163,11 @@ func TestConstantTimeStatistical(t *testing.T) {
 	}
 	idx := 0
 	// load copies the secret into the fixed inputs (untimed); run is timed.
+	var in1, in2 scalar // shares of in (k = in1 + in2), as in signing
 	loadScalar := func(k *scalar) {
 		in = *k
+		in1 = rhos[(idx+128)&255]
+		in2.sub(k, &in1)
 		c := k.canonical()
 		key.setShares(&c) // fresh random shares, as ParsePrivateKey does
 		idx++
@@ -188,8 +191,8 @@ func TestConstantTimeStatistical(t *testing.T) {
 		}},
 		{"diag: raw inverse", true, func() { sinkS.inv(&in) }},
 		{"diag: raw k·G", true, func() { sink.scalarBaseMult(&in) }},
-		{"blinded inverse", false, func() { sinkS.invBlinded(&in, &rhos[idx&255]) }},
-		{"blinded k·G", false, func() { sink.scalarBaseMultBlinded(&in, nil) }},
+		{"masked inverse", false, func() { sinkS.invMaskedShares(&in1, &in2, &rhos[idx&255]) }},
+		{"masked k·G", false, func() { sink.scalarBaseMultShares(&in1, &in2, nil) }},
 		{"Sign", false, func() { Sign(key, digest) }},
 		{"PublicKey", false, func() { sinkP, _ = key.PublicKey() }},
 	}

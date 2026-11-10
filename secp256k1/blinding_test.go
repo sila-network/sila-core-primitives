@@ -61,11 +61,20 @@ func TestBlindedInverseMatchesPlain(t *testing.T) {
 		if rho.isZero() == 1 {
 			t.Fatal("zero blinding")
 		}
+		// Shares k = k1 + k2 with a derived mask, as in signing.
+		kc := sk.canonical()
+		m := derivedMaskLimbs(&seed, 'K')
+		var k2c limbs
+		scalarN.sub(&k2c, &kc, &m)
+		var k1, k2 scalar
+		scalarN.toMont(&k1.v, &m)
+		scalarN.toMont(&k2.v, &k2c)
 		var want, got scalar
 		want.inv(&sk)
-		got.invBlinded(&sk, &rho)
+		got.invMaskedShares(&k1, &k2, &rho)
+		got.mul(&got, &rho) // (k·rho)^-1 · rho = k^-1
 		if got != want {
-			t.Fatalf("blinded inverse differs for %x", k)
+			t.Fatalf("masked inverse differs for %x", k)
 		}
 	}
 }

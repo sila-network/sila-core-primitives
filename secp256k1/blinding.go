@@ -19,9 +19,11 @@ package secp256k1
 //     b and −b·G are generated once from crypto/rand (lazily, like a
 //     randomized context in other libraries) and can be refreshed with
 //     RefreshBlinding.
-//   - k⁻¹ is computed as (k·ρ)⁻¹·ρ for a per-signature secret ρ derived
-//     from the RFC 6979 state: the inversion processes k·ρ, which is
-//     uniform for every k.
+//   - the nonce is created as shares k = k1 + k2 (canonical domain, no
+//     multiplication); k⁻¹·e is computed as (k1·ρ + k2·ρ)⁻¹·(ρ·e) for a
+//     per-signature secret ρ derived from the RFC 6979 state, so neither k
+//     nor k⁻¹ is ever a multiplication operand;
+//   - the private key is stored as shares d = d1 + d2 (privatekey.go).
 //
 // Neither changes any result: (k + b)·G − b·G = k·G and (k·ρ)⁻¹·ρ = k⁻¹,
 // so signatures stay byte-identical to deterministic RFC 6979.
@@ -157,15 +159,32 @@ func (r *point) scalarBaseMultWith(k, b *scalar, negB *point) *point {
 	return r
 }
 
-// invBlinded sets z = k⁻¹ computed as (k·rho)⁻¹·rho, for a secret rho
-// that is not zero (constant time).
-func (z *scalar) invBlinded(k, rho *scalar) *scalar {
-	var t scalar
-	t.mul(k, rho)
-	t.inv(&t)
-	z.mul(&t, rho)
+// invMaskedShares sets z = (k·rho)⁻¹ for a secret k given as shares
+// k = k1 + k2 and a secret, non-zero rho: it computes t = k1·rho + k2·rho
+// (multiplications of pseudo-random shares) and inverts t, which is
+// uniformly distributed for every k. k itself is never a multiplication
+// operand. Multiplying the result by rho gives k⁻¹ (constant time).
+func (z *scalar) invMaskedShares(k1, k2, rho *scalar) *scalar {
+	var t, u scalar
+	t.mul(k1, rho)
+	u.mul(k2, rho)
+	t.add(&t, &u)
+	z.inv(&t)
 	t.zero()
+	u.zero()
 	return z
+}
+
+// derivedMaskLimbs returns a secret mask in [0, n), canonical limbs,
+// derived from a 32-byte secret seed with a domain-separated HMAC-SHA-256
+// (no multiplication).
+func derivedMaskLimbs(seed *[32]byte, label byte) limbs {
+	in := [1]byte{label}
+	h := hmacSHA256(seed, []byte("SILA-secp256k1-mask"), in[:])
+	m := limbsFromBytes(&h)
+	scalarN.reduceOnce(&m, &m, 0) // any 256-bit value is < 2n
+	clear(h[:])
+	return m
 }
 
 // derivedBlinding returns a secret scalar in [1, n-1] and, if withPoint,

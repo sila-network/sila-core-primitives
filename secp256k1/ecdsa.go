@@ -241,19 +241,32 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 	clear(x[:])
 	defer nonces.wipe()
 	for {
-		var k scalar
-		if !nonces.next(&k) {
+		kc, ok := nonces.next()
+		if !ok {
 			continue // candidate outside [1, n-1]: try the next one
 		}
-		// Per-signature inversion blinding rho, derived from the secret
-		// RFC 6979 key K with a domain-separated message; it does not
-		// change the RFC 6979 candidate sequence.
+		// The nonce never enters a multiplication unmasked: it is split
+		// into shares k = k1 + k2 in the canonical domain (a modular
+		// subtraction), with k1 derived from the secret RFC 6979 key K
+		// (domain-separated HMAC; the candidate sequence is unchanged).
+		// Only the pseudo-random shares are converted to Montgomery form.
+		var k1, k2 scalar
+		m := derivedMaskLimbs(&nonces.k, 'K')
+		var kc2 limbs
+		scalarN.sub(&kc2, &kc, &m)
+		scalarN.toMont(&k1.v, &m)
+		scalarN.toMont(&k2.v, &kc2)
+		clear(kc[:])
+		clear(kc2[:])
+		clear(m[:])
+		// Per-signature inversion blinding rho (another derived value).
 		rho, _ := derivedBlinding(&nonces.k, 'I', false)
-		sig, ok := signWithNonce(&priv.d1, &priv.d2, &z, &k, &rho, func() (scalar, point) {
+		sig, ok := signWithNonce(&priv.d1, &priv.d2, &z, &k1, &k2, &rho, func() (scalar, point) {
 			return derivedBlinding(&nonces.k, 'B', true)
 		})
 		rho.zero()
-		k.zero()
+		k1.zero()
+		k2.zero()
 		if ok {
 			return sig
 		}
@@ -263,9 +276,9 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 // signWithNonce computes (r, s, v) for a given nonce k. It returns false
 // if r or s is zero (probability about 2^-256), in which case the caller
 // continues with the next nonce.
-func signWithNonce(d1, d2, z, k, rho *scalar, fallback func() (scalar, point)) (Signature, bool) {
+func signWithNonce(d1, d2, z, k1, k2, rho *scalar, fallback func() (scalar, point)) (Signature, bool) {
 	var R point
-	R.scalarBaseMultBlinded(k, fallback)
+	R.scalarBaseMultShares(k1, k2, fallback)
 	x, y, _ := R.affine()
 	xb := x.bytes()
 
@@ -279,17 +292,20 @@ func signWithNonce(d1, d2, z, k, rho *scalar, fallback func() (scalar, point)) (
 		return Signature{}, false
 	}
 
-	// s = k^-1 (z + r·d) mod n, with r·d = r·d1 + r·d2 (the shares of
-	// the masked private key; d itself never enters a multiplication).
-	var s, kinv, rd, rd2 scalar
-	kinv.invBlinded(k, rho)
+	// s = k^-1 (z + r·d) = (k·rho)^-1 · (rho·(z + r·d1 + r·d2)).
+	// Every multiplication takes a share (k1, k2, d1, d2), the random rho,
+	// the uniformly distributed k·rho or its inverse, or z + r·d — never
+	// k, k^-1 or d themselves.
+	var s, t, e, rd scalar
+	t.invMaskedShares(k1, k2, rho) // (k·rho)^-1
 	rd.mul(&r, d1)
-	rd2.mul(&r, d2)
-	s.add(z, &rd)
-	s.add(&s, &rd2)
-	rd2.zero()
-	s.mul(&s, &kinv)
-	kinv.zero()
+	e.add(z, &rd)
+	rd.mul(&r, d2)
+	e.add(&e, &rd)
+	e.mul(&e, rho)
+	s.mul(&t, &e)
+	t.zero()
+	e.zero()
 	rd.zero()
 	if s.isZero() == 1 {
 		return Signature{}, false
@@ -427,17 +443,20 @@ func newRFC6979(x *[32]byte, z *scalar, extra *[ExtraEntropySize]byte) rfc6979 {
 	return g
 }
 
-// next writes the next candidate into k and reports whether it lies in
+// next returns the next candidate (canonical limbs) and whether it lies in
 // [1, n-1]. After each candidate the state advances per RFC 6979 §3.2 h.3.
-func (g *rfc6979) next(k *scalar) bool {
+func (g *rfc6979) next() (limbs, bool) {
 	if g.more {
 		g.k = hmacSHA256(&g.k, g.v[:], []byte{0x00})
 		g.v = hmacSHA256(&g.k, g.v[:])
 	}
 	g.more = true
 	g.v = hmacSHA256(&g.k, g.v[:])
-	ok := k.setBytesCanonical(&g.v) & (1 ^ k.isZero())
-	return ok == 1
+	// The candidate stays in canonical limbs: the range check uses only
+	// comparisons (no multiplication touches the nonce).
+	kc := limbsFromBytes(&g.v)
+	ok := lessThan(&kc, &scalarN.m) & (1 ^ isZeroLimbs(&kc))
+	return kc, ok == 1
 }
 
 func (g *rfc6979) wipe() {

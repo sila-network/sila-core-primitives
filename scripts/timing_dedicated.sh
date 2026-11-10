@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ahmed Ibrahim
 #
-# Timing measurement for finding S-8 on DEDICATED hardware (not a shared
+# Timing measurement for finding S-8 on DEDICATED hardware (procedure and
+# interpretation: docs/SECP256K1-DEDICATED-TIMING.md), not a shared
 # CI runner). Run it on each target machine (at least one amd64 and one
 # arm64), as root for the frequency settings, with nothing else running.
 #
@@ -13,7 +14,7 @@
 # with tiny-vs-random secrets and random-vs-random controls, and prints the
 # machine facts needed to interpret the result.
 #
-# Closure criterion for S-8 (docs/SECP256K1-SECURITY-REVIEW.md §6.1), per
+# Closure criterion for S-8 (docs/SECP256K1-DEDICATED-TIMING.md §4), per
 # machine: for every production path, no run set has |t| > 4.5 with the
 # same sign in all runs, and the controls stay below |t| = 4.5 in at least
 # 9 of 10 runs (otherwise the machine is too noisy and the result does not

@@ -40,7 +40,7 @@ open protocol items are BLOCKERs in the contract (§7).
 
 | Secret | Where | Protection |
 |---|---|---|
-| Private key d | `PrivateKey.d` | Range check, d·G, r·d and serialization are constant time. No `math/big`. |
+| Private key d | `PrivateKey.d1`, `PrivateKey.d2` | Stored as random shares d = d1 + d2 (HMAC-derived mask, S-8/S-9); range check by comparisons; d·G, r·d and serialization use only the shares (additions rebuild d); constant time; no `math/big`. |
 | Nonce k | inside `sign` | RFC 6979 on stack buffers; the candidate is checked by comparisons and split into shares k1 + k2 (no multiplication on k); k·G by the blinded constant-time base table on the shares; the inversion processes k1·ρ + k2·ρ; k⁻¹ is never formed; shares overwritten after use. |
 | Extra entropy (hedged API) | `SignWithExtraEntropy`, `SignHedged` | Copied into the stack HMAC input, cleared after use. |
 | HMAC state (K, V) | `rfc6979` value on the stack | Fixed-size stack arrays, cleared. Sign makes 0 heap allocations (`TestSignDoesNotAllocate`, `TestSignHedged`). |
@@ -89,9 +89,9 @@ Enforced by tests:
 | S-4 | An unchecked assumption about digests ≥ n | Measured; documented in the contract | `TestSecp256k1DigestAboveOrder` |
 | S-5 | High-S handling was one rule for all contexts; raw recovery must accept high-S, transactions must not | Strict and recovery-compatible parsers; `txsig` rules; `Verify` stays strict | `TestHighSContexts`, `TestParityRawRecovery`, `TestParityValidateSignatureValues` |
 | S-6 | Branch-free source does not guarantee branch-free machine code | Compiled-code check in CI on five architectures | `TestCompiledConstantTimeFunctions` |
-| S-10 | Review finding (Codex, P1, 541fc86): the nonce still entered three multiplications unmasked — its Montgomery conversion in the RFC 6979 step, k·ρ in the blinded inversion, and the final multiplication by the reconstructed k⁻¹ — so the earlier claim "no multiplication takes k" was wrong | The nonce is created as shares k = k1 + k2 in the canonical domain (range check by comparison only); k·G = ((k1 + b) + k2)·G; s = (k1·ρ + k2·ρ)⁻¹ · (ρ·z + (r·d1)·ρ + (r·d2)·ρ). Follow-up finding on ce336ed (P1): the first version recombined z + r·d (an affine encoding of d) before multiplying by ρ; the numerator now stays in shares until after the multiplication. Neither k, k⁻¹, d nor z + r·d is ever a multiplication operand | `TestBlindedInverseMatchesPlain` (masked inverse), all parity tests byte-identical |
+| S-10 | Review findings (Codex, two P1; fixed in ce336ed and e872dfd, re-reviewed on e872dfd with no findings) — first, on 541fc86: the nonce still entered three multiplications unmasked — its Montgomery conversion in the RFC 6979 step, k·ρ in the blinded inversion, and the final multiplication by the reconstructed k⁻¹ — so the earlier claim "no multiplication takes k" was wrong | The nonce is created as shares k = k1 + k2 in the canonical domain (range check by comparison only); k·G = ((k1 + b) + k2)·G; s = (k1·ρ + k2·ρ)⁻¹ · (ρ·z + (r·d1)·ρ + (r·d2)·ρ). Follow-up finding on ce336ed (P1): the first version recombined z + r·d (an affine encoding of d) before multiplying by ρ; the numerator now stays in shares until after the multiplication. Neither k, k⁻¹, d nor z + r·d is ever a multiplication operand | `TestBlindedInverseMatchesPlain` (masked inverse), all parity tests byte-identical |
 | S-9 | Randomness failure paths: unbounded loop on a broken source; a zero source left the key unmasked; one failure disabled the process-wide blinding | Bounded draws; HMAC-derived key mask; retry instead of `sync.Once` | `TestBlindingWithoutRandomness`, `TestRefreshBlindingBounded` |
-| S-8 | Value-dependent timing for extreme secrets on shared runners (inversion, k·G) | Blinded nonce inversion, blinded fixed-base multiplication, masked private key; corrected timing harness | `TestBlinded*`, `TestPrivateKeyShares`, `TestConstantTimeStatistical` (§6.1); **mitigated, not closed** |
+| S-8 | Value-dependent timing for extreme secrets on shared runners (inversion, k·G) | Blinded fixed-base multiplication; private key and nonce as random shares; inversion and numerator on shares (with S-10); corrected and counterbalanced timing harness | `TestBlinded*`, `TestPrivateKeyShares`, `TestConstantTimeStatistical` (§6.1); **mitigated — not closed** |
 | S-7 | During the optimization round, one timing session showed \|t\| = 5.5 for k·G | Re-measured with 5× more samples and a random-vs-random control: \|t\| did not grow, and the control reached the same level (see §6) | `TestConstantTimeStatistical` (control class) |
 
 ## 5. Correctness evidence
@@ -132,7 +132,7 @@ This cannot rule out smaller leaks or micro-architectural channels
 
 ### 6.1 Finding S-8 — value-dependent timing on shared runners
 
-**Status: mitigated; NOT closed for production** (see "closure" below).
+**Status: Mitigated — Not Closed** (not approved for production; see "Closure" below).
 
 **What was observed (05622d6).** On shared GitHub runners (no FEAT_DIT),
 scalar inversion (amd64, t +9.25..+56.99) and k·G (arm64, t −6.8..−12.4)
@@ -162,7 +162,8 @@ form k·(2^256 mod n) has zero high limbs) than for random ones.
    DIT rules out. The exact micro-architectural mechanism was not
    identified; it varies between runner instances.
 
-**Fix (724ef8e, 1a6e7ca, and the private-key masking commit).** Make every
+**Fix (724ef8e blinding, f4ff94b key shares, 541fc86 randomness failures
+(S-9), ce336ed and e872dfd nonce and numerator shares (S-10)).** Make every
 value that reaches a multiplication statistically independent of the
 secret, whatever the processor does:
 - nonce: created as shares k = k1 + k2 (S-10); s = (k1·ρ + k2·ρ)⁻¹ ·
@@ -177,15 +178,19 @@ secret, whatever the processor does:
 - unchanged results: signatures stay byte-identical to deterministic
   RFC 6979 (all parity tests), 0 allocations; Sign +3 µs.
 
-**Evidence after the fix** (corrected harness since 1a6e7ca; 100k samples
-× 5 runs per job; a production path fails when all 5 runs exceed
-|t| = 4.5 with the same sign). 10 jobs on shared GitHub runners (5 amd64,
-5 arm64; commits 1a6e7ca, a re-run, and f4ff94b with the masked key):
+**Method.** Corrected harness (secret loaded outside the timed region
+since 1a6e7ca; class order counterbalanced since e54f799); 100k samples ×
+5 runs per job; a production path fails when all 5 runs exceed |t| = 4.5
+with the same sign.
+
+**Intermediate code (superseded; 1a6e7ca, a re-run, f4ff94b — before the
+nonce shares of S-10): 10 jobs** on shared GitHub runners (5 amd64,
+5 arm64):
 
 | Path | Jobs meeting the failure criterion | Notes |
 |---|---|---|
 | raw inversion (diagnostic, unblinded) | 1 of 10 by the criterion; 3 of 10 with all 5 runs on one side | clean-control cases: amd64 +19.98..+46.03, arm64 +0.65..+22.01 |
-| blinded inversion | 0 of 10 | |
+| blinded inversion (then: (k·ρ)⁻¹·ρ) | 0 of 10 | |
 | blinded k·G | 0 of 10 | two arm64 jobs had all-positive t (0.84..11.67), below the criterion |
 | Sign | 0 of 10 | one pre-masking amd64 job had all-negative t (−1.62..−6.09) |
 | PublicKey | 0 of 10 | one arm64 job all-positive (1.39..9.17) with a control of the same size (−6.16..8.66) |
@@ -194,11 +199,11 @@ The random-vs-random controls themselves reach |t| = 10–120 and sometimes
 keep one sign over 5 runs (e.g. +1.78..+4.75), so these runners cannot
 resolve effects below roughly |t| ≈ 10.
 
-**Final code (e54f799: masked nonce, masked key, shared numerator,
-counterbalanced harness).** 6 jobs: 2 amd64, 2 Linux arm64 (no DIT),
+**Final code: 12 jobs.** e54f799 (6 jobs) and 4ec9ea3 (documentation
+only, same code; 6 jobs): per commit 2 amd64, 2 Linux arm64 (no DIT) and
 2 macOS arm64 (Apple Silicon, FEAT_DIT enabled by Sign and PublicKey).
 All production paths (masked inverse, masked k·G, Sign, PublicKey) passed in
-all 6 jobs. Below the criterion, one amd64 job showed PublicKey with five
+all 12 jobs. On e54f799, below the criterion, one amd64 job showed PublicKey with five
 positive values (+0.35..+5.70) and Sign 4 of 5 positive, while its
 controls had mixed signs; the macOS (DIT) jobs showed no same-sign series.
 Counterbalancing removed a positional bias of the harness that had made a
@@ -210,8 +215,9 @@ multiplication unmasked) and the production paths pass on shared runners,
 but it is **not closed**: (a) the shared runners are too noisy to give
 strong repeated evidence (controls reach |t| = 20–120 in some runs); (b) no
 dedicated, quiet amd64 and arm64 hardware with DIT/DOIT was available;
-(c) the masking commit has 4 runner jobs so far. Required to close: millions of samples on dedicated hardware for
-each target CPU, including the masked Sign and PublicKey paths.
+(c) no independent human audit of the countermeasures. Required to close:
+the dedicated-hardware measurements and the audit of §6.3, following
+[`SECP256K1-DEDICATED-TIMING.md`](SECP256K1-DEDICATED-TIMING.md).
 
 ### 6.2 Behaviour without (or with broken) randomness — finding S-9
 
@@ -234,11 +240,11 @@ cryptographically secure source: a predictable one voids the protection
 
 | Test | Why it is needed | Status |
 |---|---|---|
-| ≥ 1,000,000 samples × 10 runs per path on a dedicated amd64 machine (fixed frequency, no turbo, isolated core) | shared runners' controls reach \|t\| = 10–120 | **not available**; `scripts/timing_dedicated.sh` is ready |
+| ≥ 1,000,000 samples × 10 runs per path on a dedicated amd64 machine (fixed frequency, no turbo, isolated core) | shared runners' controls reach \|t\| = 10–120 | **external blocker** (no hardware here); procedure: [`SECP256K1-DEDICATED-TIMING.md`](SECP256K1-DEDICATED-TIMING.md) |
 | the same on a dedicated arm64 machine with FEAT_DIT (and one without) | Arm guarantees data-independent timing only under DIT | **not available**; partial: CI job on macOS arm64 (Apple Silicon, FEAT_DIT) |
 | x86 with DOIT enabled (Intel `IA32_UARCH_MISC_CTL`, AMD equivalent) | the x86 counterpart of DIT; needs kernel/BIOS support | **not available** |
 | power / electromagnetic analysis | timing tests cannot see these channels | **not available** (lab equipment) |
-| independent human audit of the blinding and masking code | the reviews so far are internal and automated | **not available**; requested from the owner |
+| independent human audit of the blinding and masking code | the reviews so far are internal and automated | **external blocker**; requested from the owner |
 
 Closure criterion per machine (also in the script): for every production
 path, no set of 10 runs has \|t\| > 4.5 with one sign in all runs, and the

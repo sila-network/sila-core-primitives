@@ -61,8 +61,8 @@ func crop(x []float64, keep float64) []float64 {
 
 // measureClassesSigned returns the Welch t statistic with the largest
 // magnitude over the cropping levels, keeping its sign (a's mean minus b's).
-func measureClassesSigned(samples int, classA, classB func(i int) func()) float64 {
-	a, b := sampleClasses(samples, classA, classB)
+func measureClassesSigned(samples int, load func(class, i int), run func()) float64 {
+	a, b := sampleClasses(samples, load, run)
 	best := 0.0
 	for _, keep := range []float64{0.5, 0.75, 0.9} {
 		tv := welchT(crop(a, keep), crop(b, keep))
@@ -101,20 +101,20 @@ func fmtTs(ts []float64) string {
 	return out + "]"
 }
 
-func sampleClasses(samples int, classA, classB func(i int) func()) (a, b []float64) {
+// sampleClasses interleaves the two classes at random. For each sample,
+// load (not timed) copies the class's secret into the fixed input
+// variable, then run (timed) executes the operation on it. Keeping the
+// copy out of the timed region removes any effect of where each class's
+// values are stored in memory.
+func sampleClasses(samples int, load func(class, i int), run func()) (a, b []float64) {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	for i := 0; i < samples; i++ {
-		useA := rng.Intn(2) == 0
-		var f func()
-		if useA {
-			f = classA(i)
-		} else {
-			f = classB(i)
-		}
+		class := rng.Intn(2)
+		load(class, i)
 		start := time.Now()
-		f()
+		run()
 		d := float64(time.Since(start).Nanoseconds())
-		if useA {
+		if class == 0 {
 			a = append(a, d)
 		} else {
 			b = append(b, d)
@@ -162,31 +162,31 @@ func TestConstantTimeStatistical(t *testing.T) {
 		rhos[i] = scalarFromBig(new(big.Int).Add(big.NewInt(1), new(big.Int).Mod(new(big.Int).SetBytes(randBytes(brng)), new(big.Int).Sub(bigN, big.NewInt(1)))))
 	}
 	idx := 0
+	// load copies the secret into the fixed inputs (untimed); run is timed.
+	loadScalar := func(k *scalar) { in = *k; key.d = *k; idx++ }
 	ops := []struct {
 		name       string
 		diagnostic bool
-		run        func(k *scalar)
+		run        func()
 	}{
-		{"diag: harness only", true, func(k *scalar) { in = *k }},
-		{"diag: field mul x64", true, func(k *scalar) {
-			in = *k
+		{"diag: timer only", true, func() {}},
+		{"diag: field mul x64", true, func() {
 			x := fieldElement{v: in.v} // Montgomery limbs of the secret
 			for i := range ys {
 				sinkF.mul(&x, &ys[i])
 			}
 		}},
-		{"diag: scalar mul x64", true, func(k *scalar) {
-			in = *k
+		{"diag: scalar mul x64", true, func() {
 			for i := range ysc {
 				sinkS.mul(&in, &ysc[i])
 			}
 		}},
-		{"diag: raw inverse", true, func(k *scalar) { in = *k; sinkS.inv(&in) }},
-		{"diag: raw k·G", true, func(k *scalar) { in = *k; sink.scalarBaseMult(&in) }},
-		{"blinded inverse", false, func(k *scalar) { in = *k; idx++; sinkS.invBlinded(&in, &rhos[idx&255]) }},
-		{"blinded k·G", false, func(k *scalar) { in = *k; sink.scalarBaseMultBlinded(&in, nil) }},
-		{"Sign", false, func(k *scalar) { key.d = *k; Sign(key, digest) }},
-		{"PublicKey", false, func(k *scalar) { key.d = *k; sinkP, _ = key.PublicKey() }},
+		{"diag: raw inverse", true, func() { sinkS.inv(&in) }},
+		{"diag: raw k·G", true, func() { sink.scalarBaseMult(&in) }},
+		{"blinded inverse", false, func() { sinkS.invBlinded(&in, &rhos[idx&255]) }},
+		{"blinded k·G", false, func() { sink.scalarBaseMultBlinded(&in, nil) }},
+		{"Sign", false, func() { Sign(key, digest) }},
+		{"PublicKey", false, func() { sinkP, _ = key.PublicKey() }},
 	}
 	only := os.Getenv("SILA_TIMING_ONLY") // optional substring filter
 	seed := time.Now().UnixNano()
@@ -204,11 +204,17 @@ func TestConstantTimeStatistical(t *testing.T) {
 				b[i] = scalarFromBig(new(big.Int).Mod(new(big.Int).SetBytes(randBytes(rng)), bigN))
 				c[i] = scalarFromBig(new(big.Int).Mod(new(big.Int).SetBytes(randBytes(rng)), bigN))
 			}
-			class := func(set []scalar) func(i int) func() {
-				return func(i int) func() { return func() { op.run(&set[i%256]) } }
+			pair := func(x, y []scalar) func(class, i int) {
+				return func(class, i int) {
+					if class == 0 {
+						loadScalar(&x[i%256])
+					} else {
+						loadScalar(&y[i%256])
+					}
+				}
 			}
-			ts = append(ts, measureClassesSigned(samples, class(a), class(b)))
-			cs = append(cs, measureClassesSigned(samples, class(c), class(b)))
+			ts = append(ts, measureClassesSigned(samples, pair(a, b), op.run))
+			cs = append(cs, measureClassesSigned(samples, pair(c, b), op.run))
 		}
 		minT, sameSign := minAbs(ts), sameSigns(ts)
 		kind := "production"

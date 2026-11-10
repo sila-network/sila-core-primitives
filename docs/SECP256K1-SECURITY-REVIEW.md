@@ -89,7 +89,7 @@ Enforced by tests:
 | S-4 | An unchecked assumption about digests ≥ n | Measured; documented in the contract | `TestSecp256k1DigestAboveOrder` |
 | S-5 | High-S handling was one rule for all contexts; raw recovery must accept high-S, transactions must not | Strict and recovery-compatible parsers; `txsig` rules; `Verify` stays strict | `TestHighSContexts`, `TestParityRawRecovery`, `TestParityValidateSignatureValues` |
 | S-6 | Branch-free source does not guarantee branch-free machine code | Compiled-code check in CI on five architectures | `TestCompiledConstantTimeFunctions` |
-| S-10 | Review finding (Codex, P1, 541fc86): the nonce still entered three multiplications unmasked — its Montgomery conversion in the RFC 6979 step, k·ρ in the blinded inversion, and the final multiplication by the reconstructed k⁻¹ — so the earlier claim "no multiplication takes k" was wrong | The nonce is created as shares k = k1 + k2 in the canonical domain (range check by comparison only); k·G = ((k1 + b) + k2)·G; s = (k1·ρ + k2·ρ)⁻¹ · (ρ·(z + r·d1 + r·d2)). Neither k, k⁻¹ nor d is ever a multiplication operand | `TestBlindedInverseMatchesPlain` (masked inverse), all parity tests byte-identical |
+| S-10 | Review finding (Codex, P1, 541fc86): the nonce still entered three multiplications unmasked — its Montgomery conversion in the RFC 6979 step, k·ρ in the blinded inversion, and the final multiplication by the reconstructed k⁻¹ — so the earlier claim "no multiplication takes k" was wrong | The nonce is created as shares k = k1 + k2 in the canonical domain (range check by comparison only); k·G = ((k1 + b) + k2)·G; s = (k1·ρ + k2·ρ)⁻¹ · (ρ·z + (r·d1)·ρ + (r·d2)·ρ). Follow-up finding on ce336ed (P1): the first version recombined z + r·d (an affine encoding of d) before multiplying by ρ; the numerator now stays in shares until after the multiplication. Neither k, k⁻¹, d nor z + r·d is ever a multiplication operand | `TestBlindedInverseMatchesPlain` (masked inverse), all parity tests byte-identical |
 | S-9 | Randomness failure paths: unbounded loop on a broken source; a zero source left the key unmasked; one failure disabled the process-wide blinding | Bounded draws; HMAC-derived key mask; retry instead of `sync.Once` | `TestBlindingWithoutRandomness`, `TestRefreshBlindingBounded` |
 | S-8 | Value-dependent timing for extreme secrets on shared runners (inversion, k·G) | Blinded nonce inversion, blinded fixed-base multiplication, masked private key; corrected timing harness | `TestBlinded*`, `TestPrivateKeyShares`, `TestConstantTimeStatistical` (§6.1); **mitigated, not closed** |
 | S-7 | During the optimization round, one timing session showed \|t\| = 5.5 for k·G | Re-measured with 5× more samples and a random-vs-random control: \|t\| did not grow, and the control reached the same level (see §6) | `TestConstantTimeStatistical` (control class) |
@@ -166,7 +166,7 @@ form k·(2^256 mod n) has zero high limbs) than for random ones.
 value that reaches a multiplication statistically independent of the
 secret, whatever the processor does:
 - nonce: created as shares k = k1 + k2 (S-10); s = (k1·ρ + k2·ρ)⁻¹ ·
-  (ρ·(z + r·d)) with a per-signature secret ρ derived from the RFC 6979
+  (ρ·z + (r·d1)·ρ + (r·d2)·ρ) with a per-signature secret ρ derived from the RFC 6979
   key K (domain-separated HMAC; the candidate sequence is unchanged), so
   neither k nor k⁻¹ is a multiplication operand;
 - k·G and d·G: (k + b)·G + (−b·G) with a secret process-wide b

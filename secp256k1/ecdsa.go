@@ -292,17 +292,21 @@ func signWithNonce(d1, d2, z, k1, k2, rho *scalar, fallback func() (scalar, poin
 		return Signature{}, false
 	}
 
-	// s = k^-1 (z + r·d) = (k·rho)^-1 · (rho·(z + r·d1 + r·d2)).
-	// Every multiplication takes a share (k1, k2, d1, d2), the random rho,
-	// the uniformly distributed k·rho or its inverse, or z + r·d — never
-	// k, k^-1 or d themselves.
+	// s = k^-1 (z + r·d) = (k·rho)^-1 · (rho·z + (r·d1)·rho + (r·d2)·rho).
+	// The numerator stays in shares until it has been multiplied by rho:
+	// every multiplication takes public values (r, z), the random rho, a
+	// share-derived value (r·d1, r·d2), the uniformly distributed k·rho or
+	// its inverse, or rho·(z + r·d) — never k, k^-1, d or z + r·d (an
+	// affine encoding of d) themselves.
 	var s, t, e, rd scalar
 	t.invMaskedShares(k1, k2, rho) // (k·rho)^-1
+	e.mul(z, rho)
 	rd.mul(&r, d1)
-	e.add(z, &rd)
-	rd.mul(&r, d2)
+	rd.mul(&rd, rho)
 	e.add(&e, &rd)
-	e.mul(&e, rho)
+	rd.mul(&r, d2)
+	rd.mul(&rd, rho)
+	e.add(&e, &rd) // rho·(z + r·d)
 	s.mul(&t, &e)
 	t.zero()
 	e.zero()

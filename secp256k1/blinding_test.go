@@ -5,7 +5,9 @@ package secp256k1
 
 import (
 	"bytes"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
+	"io"
 	"math/big"
 	"math/rand"
 	"sync"
@@ -182,3 +184,93 @@ func TestPrivateKeyShares(t *testing.T) {
 		t.Fatal("shares do not recombine")
 	}
 }
+
+type zeroReader struct{}
+
+func (zeroReader) Read(b []byte) (int, error) { clear(b); return len(b), nil }
+
+// withRandomSource runs f with the package random source replaced and the
+// process-wide blinding cleared, restoring both afterwards.
+func withRandomSource(t *testing.T, r io.Reader, f func()) {
+	t.Helper()
+	oldSrc, oldBl := randomSource, blindingState.Load()
+	randomSource = r
+	blindingState.Store(nil)
+	defer func() {
+		randomSource = oldSrc
+		blindingState.Store(oldBl)
+	}()
+	f()
+}
+
+// When randomness fails (an error) or is broken (only zeros, no error),
+// nothing runs unblinded or unmasked, nothing hangs, and every result is
+// unchanged.
+func TestBlindingWithoutRandomness(t *testing.T) {
+	rng := rand.New(rand.NewSource(84))
+	ref := testKey(t, rng)
+	db, _ := ref.Bytes()
+	digest := sha256.Sum256([]byte("no randomness"))
+	refSig, _ := Sign(ref, digest)
+	refPub, _ := ref.PublicKey()
+
+	for _, src := range []struct {
+		name string
+		r    io.Reader
+	}{{"failing", failingReader{}}, {"zeros", zeroReader{}}} {
+		withRandomSource(t, src.r, func() {
+			// Process-wide blinding cannot be created: callers must use the
+			// derived per-call blinding, never b = 0.
+			if bl := currentBlinding(); bl != nil {
+				t.Fatalf("%s: blinding created from a broken source", src.name)
+			}
+			if err := RefreshBlinding(nil); err == nil {
+				t.Fatalf("%s: RefreshBlinding succeeded", src.name)
+			}
+			k, err := ParsePrivateKey(db[:])
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The key is still masked: d1 is neither 0 nor d.
+			var zero scalar
+			ds := scalarFromBig(new(big.Int).SetBytes(db[:]))
+			if k.d1 == zero || k.d1 == ds || k.d2 == ds {
+				t.Fatalf("%s: private key stored unmasked", src.name)
+			}
+			sig, err := Sign(k, digest)
+			if err != nil || sig != refSig {
+				t.Fatalf("%s: signature changed", src.name)
+			}
+			pub, err := k.PublicKey()
+			if err != nil || !pub.Equal(refPub) {
+				t.Fatalf("%s: public key changed", src.name)
+			}
+		})
+	}
+	// A source that recovers: the process-wide blinding is created on the
+	// next call (a transient failure does not disable it).
+	withRandomSource(t, failingReader{}, func() {
+		if currentBlinding() != nil {
+			t.Fatal("blinding from failing source")
+		}
+		randomSource = cryptoRandReader()
+		if currentBlinding() == nil {
+			t.Fatal("blinding not created after the source recovered")
+		}
+	})
+}
+
+// RefreshBlinding with a broken caller-supplied source returns an error
+// after a bounded number of draws instead of looping, and keeps the
+// current blinding.
+func TestRefreshBlindingBounded(t *testing.T) {
+	before := currentBlinding()
+	if err := RefreshBlinding(zeroReader{}); err == nil {
+		t.Fatal("zero source accepted")
+	}
+	if currentBlinding() != before {
+		t.Fatal("blinding replaced after an error")
+	}
+}
+
+func cryptoRandReader() io.Reader { return cryptorand.Reader }

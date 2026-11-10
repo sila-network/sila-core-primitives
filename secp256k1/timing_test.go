@@ -199,6 +199,9 @@ func TestConstantTimeStatistical(t *testing.T) {
 		if only != "" && !strings.Contains(op.name, only) {
 			continue
 		}
+		if op.diagnostic && os.Getenv("SILA_TIMING_PRODUCTION_ONLY") == "1" {
+			continue
+		}
 		var ts, cs []float64
 		for r := 0; r < reps; r++ {
 			rng := rand.New(rand.NewSource(seed + int64(r)))

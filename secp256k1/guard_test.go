@@ -22,8 +22,8 @@ import (
 func TestNoVariableTimeImports(t *testing.T) {
 	allowed := map[string]bool{
 		"crypto/hmac": true, "crypto/rand": true, "crypto/sha256": true, "crypto/subtle": true,
-		"sync": true, "sync/atomic": true,
-		"errors": true, "hash": true, "io": true, "math/bits": true,
+		"sync/atomic": true,
+		"errors":      true, "hash": true, "io": true, "math/bits": true,
 	}
 	files, err := filepath.Glob("*.go")
 	if err != nil {

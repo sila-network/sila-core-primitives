@@ -89,6 +89,7 @@ Enforced by tests:
 | S-4 | An unchecked assumption about digests ≥ n | Measured; documented in the contract | `TestSecp256k1DigestAboveOrder` |
 | S-5 | High-S handling was one rule for all contexts; raw recovery must accept high-S, transactions must not | Strict and recovery-compatible parsers; `txsig` rules; `Verify` stays strict | `TestHighSContexts`, `TestParityRawRecovery`, `TestParityValidateSignatureValues` |
 | S-6 | Branch-free source does not guarantee branch-free machine code | Compiled-code check in CI on five architectures | `TestCompiledConstantTimeFunctions` |
+| S-9 | Randomness failure paths: unbounded loop on a broken source; a zero source left the key unmasked; one failure disabled the process-wide blinding | Bounded draws; HMAC-derived key mask; retry instead of `sync.Once` | `TestBlindingWithoutRandomness`, `TestRefreshBlindingBounded` |
 | S-8 | Value-dependent timing for extreme secrets on shared runners (inversion, k·G) | Blinded nonce inversion, blinded fixed-base multiplication, masked private key; corrected timing harness | `TestBlinded*`, `TestPrivateKeyShares`, `TestConstantTimeStatistical` (§6.1); **mitigated, not closed** |
 | S-7 | During the optimization round, one timing session showed \|t\| = 5.5 for k·G | Re-measured with 5× more samples and a random-vs-random control: \|t\| did not grow, and the control reached the same level (see §6) | `TestConstantTimeStatistical` (control class) |
 
@@ -199,11 +200,43 @@ dedicated, quiet amd64 and arm64 hardware with DIT/DOIT was available;
 (c) the masking commit has 4 runner jobs so far. Required to close: millions of samples on dedicated hardware for
 each target CPU, including the masked Sign and PublicKey paths.
 
+### 6.2 Behaviour without (or with broken) randomness — finding S-9
+
+Audit of every path that reads randomness in the blinding and masking
+code (the RFC 6979 output never depends on randomness):
+
+| Situation | Before | Now |
+|---|---|---|
+| crypto/rand fails (Go 1.23 returns an error; Go ≥ 1.24 crashes the program instead, fail-closed) | per-call blinding derived from the secret (safe), but a failure at first use disabled the process-wide blinding for the life of the process (`sync.Once`) | same safe fallback; creation is retried on the next call |
+| a source returns only zeros (no error) to `RefreshBlinding` | **endless loop** (rejection sampling without bound) | error after 64 draws, current blinding kept |
+| a source returns zeros to the key mask | **key stored unmasked** (d1 = 0) | mask = HMAC-SHA-256(key = d, label ‖ random) — pseudo-random and secret even with no or predictable randomness |
+| any failure | never an unblinded or unmasked computation; results unchanged | covered by `TestBlindingWithoutRandomness`, `TestRefreshBlindingBounded` |
+
+`SignHedged` with a failing reader returns the reader's error (it never
+signs without its extra entropy). `RefreshBlinding` requires a
+cryptographically secure source: a predictable one voids the protection
+(never correctness), which is documented on the function.
+
+### 6.3 What closing S-8 still requires (not available here)
+
+| Test | Why it is needed | Status |
+|---|---|---|
+| ≥ 1,000,000 samples × 10 runs per path on a dedicated amd64 machine (fixed frequency, no turbo, isolated core) | shared runners' controls reach \|t\| = 10–120 | **not available**; `scripts/timing_dedicated.sh` is ready |
+| the same on a dedicated arm64 machine with FEAT_DIT (and one without) | Arm guarantees data-independent timing only under DIT | **not available**; partial: CI job on macOS arm64 (Apple Silicon, FEAT_DIT) |
+| x86 with DOIT enabled (Intel `IA32_UARCH_MISC_CTL`, AMD equivalent) | the x86 counterpart of DIT; needs kernel/BIOS support | **not available** |
+| power / electromagnetic analysis | timing tests cannot see these channels | **not available** (lab equipment) |
+| independent human audit of the blinding and masking code | the reviews so far are internal and automated | **not available**; requested from the owner |
+
+Closure criterion per machine (also in the script): for every production
+path, no set of 10 runs has \|t\| > 4.5 with one sign in all runs, and the
+random-vs-random controls stay below 4.5 in at least 9 of 10 runs.
+
 ## 7. Residual risks (must be resolved or accepted before production)
 
-0. **Timing finding S-8 — mitigated, not closed** (§6.1): processor
+0. **Timing finding S-8 — mitigated, not closed** (§6.1, §6.3): processor
    value-dependent timing on shared runners; blinding and key masking are
-   in place; closing needs dedicated-hardware measurements.
+   in place; closing needs the dedicated-hardware measurements of §6.3 and
+   an independent audit.
 1. **No independent audit** of the arithmetic, the formulas, the GLV code
    or the constant-time claims.
 2. **Timing evidence is limited** to a shared VM. Needed: millions of

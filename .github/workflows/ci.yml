@@ -143,14 +143,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25.x"
           cache: false
+      - name: Welch t-test (macOS arm64; Apple Silicon has FEAT_DIT, which Sign and PublicKey enable)
+        if: runner.os == 'macOS'
+        run: |
+          uname -m
+          go version
+          sysctl -n hw.optional.arm.FEAT_DIT 2>/dev/null | sed 's/^/FEAT_DIT=/' || echo "FEAT_DIT unknown"
+          SILA_TIMING_TEST=1 SILA_TIMING_SAMPLES=100000 SILA_TIMING_REPS=5 go test -count=1 -timeout 60m -run ConstantTimeStatistical -v ./secp256k1 | grep -E 'timing_test|^(---|ok|FAIL)'
       - name: Welch t-test, tiny vs random secrets with random-vs-random controls (100k samples, 5 runs, pinned core)
+        if: runner.os == 'Linux'
         run: |
           uname -m
           go version

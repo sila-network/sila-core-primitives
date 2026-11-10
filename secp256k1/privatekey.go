@@ -50,27 +50,29 @@ func ParsePrivateKey(b []byte) (*PrivateKey, error) {
 	return k, nil
 }
 
-// setShares stores the canonical value d (< n) as random shares. The
-// shares are formed in the canonical domain with a modular subtraction
-// (no multiplication involves d); each share is then converted to
-// Montgomery form, which multiplies only uniformly random values.
+// setShares stores the canonical value d (< n) as shares d = d1 + d2.
+//
+// The mask d1 = HMAC-SHA-256(key = d, "SILA-secp256k1-key-mask" || R) mod n,
+// with 32 fresh bytes R from the random source. It is pseudo-random and
+// secret even if R is missing or predictable (a failed or broken source
+// leaves a fixed, still secret, mask instead of an unmasked key), and it
+// is fresh for every parse when R is random. The shares are formed in the
+// canonical domain with a modular subtraction (no multiplication involves
+// d); each share is then converted to Montgomery form, which multiplies
+// only pseudo-random values.
 func (k *PrivateKey) setShares(d *limbs) {
-	var m limbs
-	var mb [32]byte
-	if _, err := io.ReadFull(rand.Reader, mb[:]); err == nil {
-		m = limbsFromBytes(&mb)
-		scalarN.reduceOnce(&m, &m, 0) // any 256-bit value is < 2n
-	} else {
-		// No randomness: derive the mask from d itself (secret, pseudo-random).
-		var db [32]byte
-		limbsToBytes(&db, d)
-		h := hmacSHA256(&db, []byte("SILA-secp256k1-key-mask"))
-		m = limbsFromBytes(&h)
-		scalarN.reduceOnce(&m, &m, 0)
-		clear(db[:])
-		clear(h[:])
+	var rnd [32]byte
+	if _, err := io.ReadFull(randomSource, rnd[:]); err != nil {
+		clear(rnd[:]) // fall back to the deterministic, secret mask
 	}
-	clear(mb[:])
+	var db [32]byte
+	limbsToBytes(&db, d)
+	h := hmacSHA256(&db, []byte("SILA-secp256k1-key-mask"), rnd[:])
+	m := limbsFromBytes(&h)
+	scalarN.reduceOnce(&m, &m, 0) // any 256-bit value is < 2n
+	clear(db[:])
+	clear(h[:])
+	clear(rnd[:])
 	var r limbs
 	scalarN.sub(&r, d, &m) // d2 = d - d1 mod n
 	scalarN.toMont(&k.d1.v, &m)

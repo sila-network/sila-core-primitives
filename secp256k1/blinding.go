@@ -28,8 +28,8 @@ package secp256k1
 
 import (
 	cryptorand "crypto/rand"
+	"errors"
 	"io"
-	"sync"
 	"sync/atomic"
 )
 
@@ -39,10 +39,18 @@ type baseBlinding struct {
 	negB point
 }
 
-var (
-	blindingState atomic.Pointer[baseBlinding]
-	blindingOnce  sync.Once
-)
+var blindingState atomic.Pointer[baseBlinding]
+
+// randomSource is the randomness used for the process-wide blinding and
+// for private-key masks. It is crypto/rand.Reader; tests replace it to
+// exercise the failure paths.
+var randomSource io.Reader = cryptorand.Reader
+
+// maxBlindingDraws bounds the rejection sampling in newBaseBlinding: a
+// healthy source needs more than one draw with probability about 2^-128,
+// so hitting the bound means the source is broken (for example it returns
+// only zeros) and an error is better than looping forever.
+const maxBlindingDraws = 64
 
 // newBaseBlinding draws b uniformly from [1, n-1] by rejection sampling
 // and computes −b·G (constant time).
@@ -50,7 +58,10 @@ func newBaseBlinding(rand io.Reader) (*baseBlinding, error) {
 	var buf [32]byte
 	defer clear(buf[:])
 	bl := new(baseBlinding)
-	for {
+	for i := 0; ; i++ {
+		if i == maxBlindingDraws {
+			return nil, errBadRandomness
+		}
 		if _, err := io.ReadFull(rand, buf[:]); err != nil {
 			return nil, err
 		}
@@ -64,36 +75,39 @@ func newBaseBlinding(rand io.Reader) (*baseBlinding, error) {
 	return bl, nil
 }
 
+var errBadRandomness = errors.New("sila/secp256k1: random source produced no valid blinding value")
+
 // RefreshBlinding replaces the secret blinding value used by signing and
 // public-key derivation with a fresh one read from rand
 // (crypto/rand.Reader when rand is nil). It never changes any result.
 // Long-running signers may call it periodically (it costs one fixed-base
-// multiplication); it is safe for concurrent use.
+// multiplication); it is safe for concurrent use. rand must be a
+// cryptographically secure source: a predictable value would void the
+// protection (never correctness). On error the current blinding is kept.
 func RefreshBlinding(rand io.Reader) error {
 	if rand == nil {
-		rand = cryptorand.Reader
+		rand = randomSource
 	}
 	bl, err := newBaseBlinding(rand)
 	if err != nil {
 		return err
 	}
 	blindingState.Store(bl)
-	blindingOnce.Do(func() {}) // a later lazy initialization must not overwrite it
 	return nil
 }
 
-// currentBlinding returns the process-wide blinding, creating it from
-// crypto/rand on first use. It returns nil if no randomness is available,
-// in which case callers fall back to a per-call blinding.
+// currentBlinding returns the process-wide blinding, creating it from the
+// random source on first use. If the source fails, it returns nil and the
+// caller uses a per-call blinding derived from its own secret (never an
+// unblinded computation); creation is attempted again on the next call,
+// so a transient failure does not disable the process-wide blinding.
 func currentBlinding() *baseBlinding {
 	if bl := blindingState.Load(); bl != nil {
 		return bl
 	}
-	blindingOnce.Do(func() {
-		if bl, err := newBaseBlinding(cryptorand.Reader); err == nil {
-			blindingState.CompareAndSwap(nil, bl)
-		}
-	})
+	if bl, err := newBaseBlinding(randomSource); err == nil {
+		blindingState.CompareAndSwap(nil, bl)
+	}
 	return blindingState.Load()
 }
 

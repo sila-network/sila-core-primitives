@@ -46,17 +46,15 @@ func jacDouble(r, p *jacobian) {
 	// as possible:
 	//   L = X^2/2 + X^2 = (3/2)·X^2, S = Y^2, T = X·S,
 	//   X3 = L^2 - 2T, Y3 = L·(T - X3) - S^2, Z3 = Y·Z.
-	var l, h, s, t, u fieldElement
+	var l, s, t, u fieldElement
 	s.square(&p.y)
 	l.square(&p.x)
-	h.halfVartime(&l)
-	addVartime(&l, &l, &h)
+	threeHalvesVartime(&l, &l)
 	t.mul(&p.x, &s)
 	r.z.mul(&p.y, &p.z)
 	var x3 fieldElement
 	x3.square(&l)
-	x3.sub(&x3, &t)
-	x3.sub(&x3, &t)
+	subTwiceVartime(&x3, &x3, &t)
 	u.sub(&t, &x3)
 	u.mul(&u, &l)
 	s.square(&s)
@@ -145,9 +143,7 @@ func jacAddFinish(r, p *jacobian, h, rr *fieldElement) {
 	hhh.mul(h, &hh)
 	v.mul(&p.x, &hh)
 	x3.square(rr)
-	x3.sub(&x3, &hhh)
-	x3.sub(&x3, &v)
-	x3.sub(&x3, &v)
+	subThriceVartime(&x3, &x3, &hhh, &v)
 	y3.sub(&v, &x3)
 	y3.mul(&y3, rr)
 	hhh.mul(&hhh, &p.y)
@@ -721,4 +717,87 @@ func (z *scalar) setLimbsVartime(x *limbs) {
 	if z.setBytesCanonical(&b) != 1 {
 		panic("sila/secp256k1: scalar constant out of range")
 	}
+}
+
+// subTwiceVartime sets z = x - 2y mod p: two subtractions in one call
+// (the field operations are not inlined, so each call saved counts on
+// the public paths). Same arithmetic as fieldElement.sub. Public values
+// only.
+func subTwiceVartime(z, x, y *fieldElement) {
+	var z0, z1, z2, z3 uint64
+	var c uint64
+	z0, c = bits.Sub64(x.v[0], y.v[0], 0)
+	z1, c = bits.Sub64(x.v[1], y.v[1], c)
+	z2, c = bits.Sub64(x.v[2], y.v[2], c)
+	z3, c = bits.Sub64(x.v[3], y.v[3], c)
+	z0, c = bits.Sub64(z0, fieldC&-c, 0)
+	z1, c = bits.Sub64(z1, 0, c)
+	z2, c = bits.Sub64(z2, 0, c)
+	z3, _ = bits.Sub64(z3, 0, c)
+	z0, c = bits.Sub64(z0, y.v[0], 0)
+	z1, c = bits.Sub64(z1, y.v[1], c)
+	z2, c = bits.Sub64(z2, y.v[2], c)
+	z3, c = bits.Sub64(z3, y.v[3], c)
+	z0, c = bits.Sub64(z0, fieldC&-c, 0)
+	z1, c = bits.Sub64(z1, 0, c)
+	z2, c = bits.Sub64(z2, 0, c)
+	z3, _ = bits.Sub64(z3, 0, c)
+	z.v = limbs{z0, z1, z2, z3}
+}
+
+// subThriceVartime sets z = x - y - 2w mod p in one call. Public values
+// only.
+func subThriceVartime(z, x, y, w *fieldElement) {
+	var z0, z1, z2, z3, c uint64
+	z0, c = bits.Sub64(x.v[0], y.v[0], 0)
+	z1, c = bits.Sub64(x.v[1], y.v[1], c)
+	z2, c = bits.Sub64(x.v[2], y.v[2], c)
+	z3, c = bits.Sub64(x.v[3], y.v[3], c)
+	z0, c = bits.Sub64(z0, fieldC&-c, 0)
+	z1, c = bits.Sub64(z1, 0, c)
+	z2, c = bits.Sub64(z2, 0, c)
+	z3, _ = bits.Sub64(z3, 0, c)
+	z0, c = bits.Sub64(z0, w.v[0], 0)
+	z1, c = bits.Sub64(z1, w.v[1], c)
+	z2, c = bits.Sub64(z2, w.v[2], c)
+	z3, c = bits.Sub64(z3, w.v[3], c)
+	z0, c = bits.Sub64(z0, fieldC&-c, 0)
+	z1, c = bits.Sub64(z1, 0, c)
+	z2, c = bits.Sub64(z2, 0, c)
+	z3, _ = bits.Sub64(z3, 0, c)
+	z0, c = bits.Sub64(z0, w.v[0], 0)
+	z1, c = bits.Sub64(z1, w.v[1], c)
+	z2, c = bits.Sub64(z2, w.v[2], c)
+	z3, c = bits.Sub64(z3, w.v[3], c)
+	z0, c = bits.Sub64(z0, fieldC&-c, 0)
+	z1, c = bits.Sub64(z1, 0, c)
+	z2, c = bits.Sub64(z2, 0, c)
+	z3, _ = bits.Sub64(z3, 0, c)
+	z.v = limbs{z0, z1, z2, z3}
+}
+
+// threeHalvesVartime sets z = (3/2)·x = x + x/2 mod p in one call
+// (halfVartime then addVartime). Public values only.
+func threeHalvesVartime(z, x *fieldElement) {
+	m := -(x.v[0] & 1)
+	h0, c := bits.Add64(x.v[0], fieldP.m[0]&m, 0)
+	h1, c := bits.Add64(x.v[1], fieldP.m[1]&m, c)
+	h2, c := bits.Add64(x.v[2], fieldP.m[2]&m, c)
+	h3, c := bits.Add64(x.v[3], fieldP.m[3]&m, c)
+	h0 = h0>>1 | h1<<63
+	h1 = h1>>1 | h2<<63
+	h2 = h2>>1 | h3<<63
+	h3 = h3>>1 | c<<63
+	r0, c := bits.Add64(x.v[0], h0, 0)
+	r1, c := bits.Add64(x.v[1], h1, c)
+	r2, c := bits.Add64(x.v[2], h2, c)
+	r3, c := bits.Add64(x.v[3], h3, c)
+	if c != 0 || (r3 == ^uint64(0) && r2 == ^uint64(0) && r1 == ^uint64(0) && r0 >= fieldP.m[0]) {
+		// r >= p (or carried): subtract p, i.e. add fieldC mod 2^256.
+		r0, c = bits.Add64(r0, fieldC, 0)
+		r1, c = bits.Add64(r1, 0, c)
+		r2, c = bits.Add64(r2, 0, c)
+		r3, _ = bits.Add64(r3, 0, c)
+	}
+	z.v = limbs{r0, r1, r2, r3}
 }

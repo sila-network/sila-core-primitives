@@ -301,3 +301,64 @@ func TestAddHalfVartime(t *testing.T) {
 		}
 	}
 }
+
+// TestFusedVartimeHelpers checks subTwiceVartime, subThriceVartime and
+// threeHalvesVartime against the operations they combine, on edge values
+// (0, 1, 2, p-1, p-2, values next to word boundaries) and random ones.
+func TestFusedVartimeHelpers(t *testing.T) {
+	edges := []fieldElement{
+		{}, fieldFromUint(1), fieldFromUint(2),
+		{v: limbs{fieldP.m[0] - 1, fieldP.m[1], fieldP.m[2], fieldP.m[3]}},
+		{v: limbs{fieldP.m[0] - 2, fieldP.m[1], fieldP.m[2], fieldP.m[3]}},
+		{v: limbs{^uint64(0), 0, 0, 0}}, {v: limbs{0, 0, 0, 1 << 63}},
+		{v: limbs{fieldC, 0, 0, 0}},
+	}
+	vals := append([]fieldElement{}, edges...)
+	var b [32]byte
+	for len(vals) < 3000 {
+		if _, err := rand.Read(b[:]); err != nil {
+			t.Fatal(err)
+		}
+		var f fieldElement
+		if f.setBytes(&b) == 1 {
+			vals = append(vals, f)
+		}
+	}
+	for i := range vals {
+		x, y, w := vals[i], vals[(i*7+1)%len(vals)], vals[(i*13+2)%len(vals)]
+		var got, want fieldElement
+		subTwiceVartime(&got, &x, &y)
+		want.sub(&x, &y)
+		want.sub(&want, &y)
+		if got != want {
+			t.Fatalf("subTwiceVartime(%x, %x)", x.v, y.v)
+		}
+		subThriceVartime(&got, &x, &y, &w)
+		want.sub(&x, &y)
+		want.sub(&want, &w)
+		want.sub(&want, &w)
+		if got != want {
+			t.Fatalf("subThriceVartime(%x, %x, %x)", x.v, y.v, w.v)
+		}
+		threeHalvesVartime(&got, &x)
+		var h fieldElement
+		h.halfVartime(&x)
+		addVartime(&want, &x, &h)
+		if got != want {
+			t.Fatalf("threeHalvesVartime(%x)", x.v)
+		}
+		// Aliasing (z = x), as used by jacDouble and jacAddFinish.
+		a := x
+		subTwiceVartime(&a, &a, &y)
+		c := x
+		subThriceVartime(&c, &c, &y, &w)
+		d := x
+		threeHalvesVartime(&d, &d)
+		var w2, w3 fieldElement
+		subTwiceVartime(&w2, &x, &y)
+		subThriceVartime(&w3, &x, &y, &w)
+		if a != w2 || c != w3 || d != want {
+			t.Fatalf("aliasing changes the result for %x", x.v)
+		}
+	}
+}

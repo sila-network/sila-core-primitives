@@ -200,9 +200,19 @@ func (z *fieldElement) mulSmall(x *fieldElement, k uint64) *fieldElement {
 	return z
 }
 
-// inv sets z = x^-1 = x^(p-2); the inverse of 0 is 0. Fixed addition
-// chain (public structure; constant time): 255 squarings, 15 products.
+// inv sets z = x^-1 mod p; the inverse of 0 is 0. Constant time: the
+// divstep inversion of inv_ct.go (fixed 744 divsteps), which measured
+// faster than the Fermat chain on arm64 (3.8 vs 4.3 us) and equal on
+// amd64.
 func (z *fieldElement) inv(x *fieldElement) *fieldElement {
+	z.v = modInverseCT(&x.v, &fieldP.m, fieldPInv62)
+	return z
+}
+
+// invFermat sets z = x^-1 = x^(p-2); the inverse of 0 is 0. Fixed
+// addition chain (public structure; constant time): 255 squarings, 15
+// products. Reference for the divstep inversion in tests.
+func (z *fieldElement) invFermat(x *fieldElement) *fieldElement {
 	// p - 2 in binary, from the top: 223 ones, 0, 22 ones, 0000, 1, 0,
 	// 11, 0, 1.
 	var x2, x22, x223, t fieldElement

@@ -119,3 +119,25 @@ func TestDivstepsBound(t *testing.T) {
 	}
 	t.Logf("maximum divsteps over the sample: %d (bound 741, run 744)", max)
 }
+
+// TestFieldInvMatchesFermat checks the field wrapper against the Fermat
+// inversion it replaced.
+func TestFieldInvMatchesFermat(t *testing.T) {
+	var b [32]byte
+	for i := 0; i < 5000; i++ {
+		if _, err := rand.Read(b[:]); err != nil {
+			t.Fatal(err)
+		}
+		var f, a, w fieldElement
+		f.setBytes(&b)
+		a.inv(&f)
+		w.invFermat(&f)
+		if a.equal(&w) != 1 {
+			t.Fatalf("field inverse of %x", b)
+		}
+	}
+	var z, zi fieldElement
+	if zi.inv(&z).isZero() != 1 {
+		t.Fatal("inverse of 0 must be 0")
+	}
+}

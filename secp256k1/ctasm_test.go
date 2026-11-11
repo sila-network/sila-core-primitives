@@ -97,7 +97,7 @@ func TestCompiledLoopsAreCounterBound(t *testing.T) {
 		lookupAffine,
 		`secp256k1\.boothDigit`,
 		`secp256k1\.\(\*scalar\)\.(inv|sqrN)`,
-		`secp256k1\.\(\*fieldElement\)\.(inv|sqrt|sqrN)`,
+		`secp256k1\.\(\*fieldElement\)\.(invFermat|sqrt|sqrN)`,
 		`secp256k1\.fieldPow2k1`,
 		`secp256k1\.divsteps62`,
 		`secp256k1\.modInverseCT`,

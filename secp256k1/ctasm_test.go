@@ -76,9 +76,20 @@ func TestCompiledConstantTimeFunctions(t *testing.T) {
 // data. It is a heuristic for review, complementing the source rules.
 func TestCompiledLoopsAreCounterBound(t *testing.T) {
 	bin := ctTestBinary(t)
+	arch := runtime.GOARCH
+	if a := os.Getenv("SILA_CT_GOARCH"); a != "" {
+		arch = a
+	}
+	// On amd64 the base-table scan is the SSE2 assembly (checked, with
+	// no branch at all, by TestCompiledFieldAsmIsStraightLine); elsewhere
+	// it is the Go loop.
+	lookupAffine := `secp256k1\.\(\*affinePoint\)\.lookupAffine`
+	if arch == "amd64" {
+		lookupAffine = `secp256k1\.lookupAffineSSE2\.abi0`
+	}
 	for _, pat := range []string{
 		`secp256k1\.\(\*point\)\.(lookup|scalarBaseMult|scalarMult)`,
-		`secp256k1\.\(\*affinePoint\)\.lookupAffine`,
+		lookupAffine,
 		`secp256k1\.boothDigit`,
 		`secp256k1\.\(\*scalar\)\.(inv|sqrN)`,
 		`secp256k1\.\(\*fieldElement\)\.(inv|sqrt|sqrN)`,

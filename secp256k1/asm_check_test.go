@@ -27,6 +27,10 @@ var asmAllowed = map[string]bool{
 	"ADDQ": true, "ADCQ": true, "ADCXQ": true, "ADOXQ": true,
 	"SBBQ": true, "SUBQ": true, "ANDQ": true, "XORQ": true, "IMULQ": true,
 	"CMOVQCS": true, "CMOVQCC": true,
+	// SSE2 (amd64 baseline) for the table scan: 128-bit loads/stores,
+	// logic, lane comparison and broadcast; no data-dependent timing.
+	"MOVOU": true, "PXOR": true, "PAND": true, "POR": true,
+	"PCMPEQL": true, "PSHUFD": true,
 	"RET": true,
 	// CPUID only in ·cpuid; the dispatch only in ·fieldMul/·fieldSqr
 	// (checked below).
@@ -170,6 +174,7 @@ func TestCompiledFieldAsmIsStraightLine(t *testing.T) {
 		"fieldMulADX": 0, "fieldSqrADX": 0, "fieldMulMULQ": 0, "fieldSqrMULQ": 0,
 		"scalarMulADX": 0, "scalarSqrADX": 0, "scalarMulMULQ": 0, "scalarSqrMULQ": 0,
 		"fieldMul": 1, "fieldSqr": 1, "scalarMul": 1, "scalarSqr": 1,
+		"lookupAffineSSE2": 0,
 	}
 	jump := regexp.MustCompile(`\tj([a-z]+)\s`)
 	found := 0

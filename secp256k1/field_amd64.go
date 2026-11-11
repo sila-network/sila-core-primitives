@@ -64,3 +64,16 @@ func scalarMulMULQ(z, x, y, n *limbs)
 
 //go:noescape
 func scalarSqrMULQ(z, x, n *limbs)
+
+// lookupAffineSSE2 sets r = table[idx-1] for 1 <= idx <= 16, reading every
+// entry (field_amd64.s).
+//
+//go:noescape
+func lookupAffineSSE2(r *affinePoint, table *[baseEntries]affinePoint, idx uint64)
+
+// lookupAffine sets r = table[mag-1], or table[0] for mag = 0, reading
+// every entry (constant time; mag <= 16).
+func (r *affinePoint) lookupAffine(table *[baseEntries]affinePoint, mag uint64) {
+	// mag = 0 selects entry 1 (as the portable version): mag | (mag-1)>>63.
+	lookupAffineSSE2(r, table, mag|((mag-1)>>63))
+}

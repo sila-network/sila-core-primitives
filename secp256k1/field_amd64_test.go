@@ -148,3 +148,22 @@ func TestScalarAsmMatchesGo(t *testing.T) {
 		}
 	}
 }
+
+// TestLookupAffineSSE2MatchesGo checks the SSE2 table scan against a plain
+// indexed read for every index of every base table, including the mag = 0
+// convention (entry 1).
+func TestLookupAffineSSE2MatchesGo(t *testing.T) {
+	for w := 0; w < baseWindows; w++ {
+		for mag := uint64(0); mag <= baseEntries; mag++ {
+			var got affinePoint
+			got.lookupAffine(&baseTable[w], mag)
+			want := baseTable[w][0]
+			if mag > 0 {
+				want = baseTable[w][mag-1]
+			}
+			if got != want {
+				t.Fatalf("window %d, magnitude %d", w, mag)
+			}
+		}
+	}
+}

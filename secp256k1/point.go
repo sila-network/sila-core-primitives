@@ -337,19 +337,6 @@ func bitsAt(k *limbs, pos, n int) uint64 {
 	return v & (1<<uint(n) - 1)
 }
 
-// lookupAffine sets r = table[mag-1] by scanning every entry (constant
-// time); for mag == 0 it is left at an arbitrary table entry, and the
-// caller discards the result of the addition.
-func (r *affinePoint) lookupAffine(table *[baseEntries]affinePoint, mag uint64) {
-	*r = table[0]
-	for i := 1; i < baseEntries; i++ {
-		d := uint64(i+1) ^ mag
-		eq := 1 ^ ((d | -d) >> 63)
-		r.x.selectFrom(&table[i].x, &r.x, eq)
-		r.y.selectFrom(&table[i].y, &r.y, eq)
-	}
-}
-
 // scalarBaseMult sets r = k·G in constant time with respect to k: 52
 // complete mixed additions with constant-time lookups, conditional
 // negations and conditional skips, and no doublings.

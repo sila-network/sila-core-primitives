@@ -12,7 +12,7 @@ package secp256k1
 //
 // Techniques:
 //   - Jacobian coordinates (x = X/Z^2, y = Y/Z^3) with the a = 0 doubling
-//     (2M + 5S), mixed addition (7M + 4S) and general addition
+//     (3M + 4S), mixed addition (8M + 3S) and general addition
 //     (11M + 5S); the exceptional cases (identity, P = ±Q) are handled by
 //     explicit branches, which is acceptable for public data.
 //   - The GLV endomorphism of secp256k1: λ·(x, y) = (β·x, y), with
@@ -42,27 +42,25 @@ func jacDouble(r, p *jacobian) {
 	}
 	// The group order is odd, so no point has y = 0. Halved form of the
 	// a = 0 doubling (the result is the usual one scaled by 1/2, which
-	// is the same Jacobian point):
-	//   L = (3/2)·X^2, S = Y^2, T = -X·S,
-	//   X3 = L^2 + 2T, Y3 = -(L·(X3 + T) + S^2), Z3 = Y·Z.
-	var l, s, t, u, w fieldElement
+	// is the same Jacobian point), written with as few field additions
+	// as possible:
+	//   L = X^2/2 + X^2 = (3/2)·X^2, S = Y^2, T = X·S,
+	//   X3 = L^2 - 2T, Y3 = L·(T - X3) - S^2, Z3 = Y·Z.
+	var l, h, s, t, u fieldElement
 	s.square(&p.y)
 	l.square(&p.x)
-	addVartime(&u, &l, &l)
-	addVartime(&l, &u, &l)
-	l.halfVartime(&l)
+	h.halfVartime(&l)
+	addVartime(&l, &l, &h)
 	t.mul(&p.x, &s)
-	t.neg(&t)
 	r.z.mul(&p.y, &p.z)
 	var x3 fieldElement
 	x3.square(&l)
-	addVartime(&x3, &x3, &t)
-	addVartime(&x3, &x3, &t)
-	addVartime(&u, &x3, &t)
+	x3.sub(&x3, &t)
+	x3.sub(&x3, &t)
+	u.sub(&t, &x3)
 	u.mul(&u, &l)
-	w.square(&s)
-	addVartime(&u, &u, &w)
-	r.y.neg(&u)
+	s.square(&s)
+	r.y.sub(&u, &s)
 	r.x = x3
 	r.inf = false
 }
@@ -127,27 +125,34 @@ func jacAddAffine(r, p *jacobian, q *affinePoint) {
 		}
 		return
 	}
-	addVartime(&rr, &rr, &rr)
-	var hh, i, j, v, x3, y3, z3 fieldElement
-	hh.square(&h)
-	addVartime(&i, &hh, &hh)
-	addVartime(&i, &i, &i)
-	j.mul(&h, &i)
-	v.mul(&p.x, &i)
-	x3.square(&rr)
-	x3.sub(&x3, &j)
+	var z3 fieldElement
+	z3.mul(&p.z, &h)
+	jacAddFinish(r, p, &h, &rr)
+	r.z = z3
+}
+
+// jacAddFinish sets r.x, r.y of the sum of p (Jacobian) and a point with
+// coordinates (U2, S2) at p's scale, given h = U2 - X1 != 0 and
+// rr = S2 - Y1 (8M + 3S form of the mixed addition, few additions):
+//
+//	HH = h^2, HHH = h·HH, V = X1·HH,
+//	X3 = rr^2 - HHH - 2V, Y3 = rr·(V - X3) - Y1·HHH, Z3 = Z1·h.
+//
+// The caller sets r.z (it may alias p). Public values only.
+func jacAddFinish(r, p *jacobian, h, rr *fieldElement) {
+	var hh, hhh, v, x3, y3 fieldElement
+	hh.square(h)
+	hhh.mul(h, &hh)
+	v.mul(&p.x, &hh)
+	x3.square(rr)
+	x3.sub(&x3, &hhh)
 	x3.sub(&x3, &v)
 	x3.sub(&x3, &v)
 	y3.sub(&v, &x3)
-	y3.mul(&y3, &rr)
-	j.mul(&j, &p.y)
-	addVartime(&j, &j, &j)
-	y3.sub(&y3, &j)
-	z3.add(&p.z, &h)
-	z3.square(&z3)
-	z3.sub(&z3, &z1z1)
-	z3.sub(&z3, &hh)
-	r.x, r.y, r.z, r.inf = x3, y3, z3, false
+	y3.mul(&y3, rr)
+	hhh.mul(&hhh, &p.y)
+	y3.sub(&y3, &hhh)
+	r.x, r.y, r.inf = x3, y3, false
 }
 
 // jacAdd sets r = p + q.
@@ -463,7 +468,7 @@ func publicKeyFromPointVartime(p *point) (PublicKey, error) {
 //   - with x' = x·Z^2, y' = y·Z^3 every point maps to the curve
 //     y'^2 = x'^3 + 7·Z^6; the a = 0 Jacobian formulas do not use the
 //     constant term, so the whole sum is computed on that curve, where the
-//     table entries are affine (mixed additions, 7M + 4S instead of
+//     table entries are affine (mixed additions, 8M + 3S instead of
 //     11M + 5S, and no inversion);
 //   - the affine G multiples are added as Jacobian points (x, y, 1/Z)
 //     (jacAddZinv, one extra multiplication), and the result's Z is
@@ -605,32 +610,18 @@ func jacAddAffineZR(r *jacobian, zr *fieldElement, p *jacobian, q *affinePoint) 
 		return false
 	}
 	rr.sub(&s2, &p.y)
-	addVartime(&rr, &rr, &rr)
-	var hh, i, j, v, x3, y3 fieldElement
-	hh.square(&h)
-	addVartime(&i, &hh, &hh)
-	addVartime(&i, &i, &i)
-	j.mul(&h, &i)
-	v.mul(&p.x, &i)
-	x3.square(&rr)
-	x3.sub(&x3, &j)
-	x3.sub(&x3, &v)
-	x3.sub(&x3, &v)
-	y3.sub(&v, &x3)
-	y3.mul(&y3, &rr)
-	j.mul(&j, &p.y)
-	addVartime(&j, &j, &j)
-	y3.sub(&y3, &j)
-	addVartime(zr, &h, &h) // z3 = 2·z1·h
-	r.z.mul(&p.z, zr)
-	r.x, r.y, r.inf = x3, y3, false
+	*zr = h // z3 = z1·h
+	var z3 fieldElement
+	z3.mul(&p.z, &h)
+	jacAddFinish(r, p, &h, &rr)
+	r.z = z3
 	return true
 }
 
 // jacAddZinv sets r = p + b, where b is given by affine coordinates
 // (b.x, b.y) and stands for the Jacobian point (b.x, b.y, 1/bz). With
 // az = p.z·bz, it is the mixed addition with az in place of p.z for b's
-// scaling, and z3 = 2·p.z·h (the common factor bz^3 cancels).
+// scaling, and z3 = p.z·h (the common factor bz^3 cancels).
 func jacAddZinv(r, p *jacobian, b *affinePoint, bz *fieldElement) {
 	if p.inf {
 		// (b.x, b.y, 1/bz) ~ (b.x·bz^2, b.y·bz^3, 1).
@@ -659,25 +650,10 @@ func jacAddZinv(r, p *jacobian, b *affinePoint, bz *fieldElement) {
 		}
 		return
 	}
-	addVartime(&rr, &rr, &rr)
-	var hh, i, j, v, x3, y3, z3 fieldElement
-	hh.square(&h)
-	addVartime(&i, &hh, &hh)
-	addVartime(&i, &i, &i)
-	j.mul(&h, &i)
-	v.mul(&p.x, &i)
-	x3.square(&rr)
-	x3.sub(&x3, &j)
-	x3.sub(&x3, &v)
-	x3.sub(&x3, &v)
-	y3.sub(&v, &x3)
-	y3.mul(&y3, &rr)
-	j.mul(&j, &p.y)
-	addVartime(&j, &j, &j)
-	y3.sub(&y3, &j)
+	var z3 fieldElement
 	z3.mul(&p.z, &h)
-	addVartime(&z3, &z3, &z3)
-	r.x, r.y, r.z, r.inf = x3, y3, z3, false
+	jacAddFinish(r, p, &h, &rr)
+	r.z = z3
 }
 
 // absHalf maps an odd digit ±(2i+1) to the table index i.

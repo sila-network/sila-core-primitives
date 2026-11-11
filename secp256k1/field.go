@@ -64,7 +64,18 @@ func (z *fieldElement) add(x, y *fieldElement) *fieldElement {
 	r1, c := bits.Add64(x.v[1], y.v[1], c)
 	r2, c := bits.Add64(x.v[2], y.v[2], c)
 	r3, c := bits.Add64(x.v[3], y.v[3], c)
-	fieldCorrect(&z.v, r0, r1, r2, r3, c)
+	// fieldCorrect, written out (it is too large for the inliner and add
+	// is on every hot path): subtract p, i.e. add fieldC mod 2^256, when
+	// the sum carried or r + fieldC carries.
+	d0, cc := bits.Add64(r0, fieldC, 0)
+	d1, cc := bits.Add64(r1, 0, cc)
+	d2, cc := bits.Add64(r2, 0, cc)
+	d3, cc := bits.Add64(r3, 0, cc)
+	m := -(c | cc)
+	z.v[0] = r0 ^ ((r0 ^ d0) & m)
+	z.v[1] = r1 ^ ((r1 ^ d1) & m)
+	z.v[2] = r2 ^ ((r2 ^ d2) & m)
+	z.v[3] = r3 ^ ((r3 ^ d3) & m)
 	return z
 }
 
@@ -176,7 +187,16 @@ func (z *fieldElement) mulSmall(x *fieldElement, k uint64) *fieldElement {
 	r1, c = bits.Add64(r1, 0, c)
 	r2, c = bits.Add64(r2, 0, c)
 	r3 += c
-	fieldCorrect(&z.v, r0, r1, r2, r3, 0)
+	// fieldCorrect written out, as in add.
+	d0, cc := bits.Add64(r0, fieldC, 0)
+	d1, cc := bits.Add64(r1, 0, cc)
+	d2, cc := bits.Add64(r2, 0, cc)
+	d3, cc := bits.Add64(r3, 0, cc)
+	m := -cc
+	z.v[0] = r0 ^ ((r0 ^ d0) & m)
+	z.v[1] = r1 ^ ((r1 ^ d1) & m)
+	z.v[2] = r2 ^ ((r2 ^ d2) & m)
+	z.v[3] = r3 ^ ((r3 ^ d3) & m)
 	return z
 }
 

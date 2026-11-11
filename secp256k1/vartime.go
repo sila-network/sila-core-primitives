@@ -37,30 +37,68 @@ func jacDouble(r, p *jacobian) {
 		r.inf = true
 		return
 	}
-	// The group order is odd, so no point has y = 0.
-	var a, b, c, d, e, f, t fieldElement
-	a.square(&p.x)
-	b.square(&p.y)
-	c.square(&b)
-	d.add(&p.x, &b)
-	d.square(&d)
-	d.sub(&d, &a)
-	d.sub(&d, &c)
-	d.add(&d, &d)
-	e.add(&a, &a)
-	e.add(&e, &a)
-	f.square(&e)
-	var z3 fieldElement
-	z3.mul(&p.y, &p.z)
-	z3.add(&z3, &z3)
-	r.x.sub(&f, &d)
-	r.x.sub(&r.x, &d)
-	t.sub(&d, &r.x)
-	t.mul(&t, &e)
-	c.mulSmall(&c, 8)
-	r.y.sub(&t, &c)
-	r.z = z3
+	// The group order is odd, so no point has y = 0. Halved form of the
+	// a = 0 doubling (the result is the usual one scaled by 1/2, which
+	// is the same Jacobian point):
+	//   L = (3/2)·X^2, S = Y^2, T = -X·S,
+	//   X3 = L^2 + 2T, Y3 = -(L·(X3 + T) + S^2), Z3 = Y·Z.
+	var l, s, t, u, w fieldElement
+	s.square(&p.y)
+	l.square(&p.x)
+	addVartime(&u, &l, &l)
+	addVartime(&l, &u, &l)
+	l.halfVartime(&l)
+	t.mul(&p.x, &s)
+	t.neg(&t)
+	r.z.mul(&p.y, &p.z)
+	var x3 fieldElement
+	x3.square(&l)
+	addVartime(&x3, &x3, &t)
+	addVartime(&x3, &x3, &t)
+	addVartime(&u, &x3, &t)
+	u.mul(&u, &l)
+	w.square(&s)
+	addVartime(&u, &u, &w)
+	r.y.neg(&u)
+	r.x = x3
 	r.inf = false
+}
+
+// addVartime sets z = x + y mod p for canonical x, y. PUBLIC values only:
+// the reduction is taken by a branch, which is almost never taken for
+// uniformly distributed values (well predicted, cheaper than the
+// constant-time selection).
+func addVartime(z, x, y *fieldElement) {
+	r0, c := bits.Add64(x.v[0], y.v[0], 0)
+	r1, c := bits.Add64(x.v[1], y.v[1], c)
+	r2, c := bits.Add64(x.v[2], y.v[2], c)
+	r3, c := bits.Add64(x.v[3], y.v[3], c)
+	if c == 0 && (r3 != ^uint64(0) || r2 != ^uint64(0) || r1 != ^uint64(0) || r0 < fieldP.m[0]) {
+		z.v = limbs{r0, r1, r2, r3}
+		return
+	}
+	// r >= p (or carried): subtract p, i.e. add fieldC mod 2^256.
+	r0, c = bits.Add64(r0, fieldC, 0)
+	r1, c = bits.Add64(r1, 0, c)
+	r2, c = bits.Add64(r2, 0, c)
+	r3, _ = bits.Add64(r3, 0, c)
+	z.v = limbs{r0, r1, r2, r3}
+}
+
+// halfVartime sets z = x/2 mod p for a canonical x: x/2 if x is even,
+// (x + p)/2 otherwise (computed with 257 bits). Branch-free, but only used
+// on public values.
+func (z *fieldElement) halfVartime(x *fieldElement) *fieldElement {
+	m := -(x.v[0] & 1)
+	r0, c := bits.Add64(x.v[0], fieldP.m[0]&m, 0)
+	r1, c := bits.Add64(x.v[1], fieldP.m[1]&m, c)
+	r2, c := bits.Add64(x.v[2], fieldP.m[2]&m, c)
+	r3, c := bits.Add64(x.v[3], fieldP.m[3]&m, c)
+	z.v[0] = r0>>1 | r1<<63
+	z.v[1] = r1>>1 | r2<<63
+	z.v[2] = r2>>1 | r3<<63
+	z.v[3] = r3>>1 | c<<63
+	return z
 }
 
 // jacAddAffine sets r = p + q for an affine q (not the identity).
@@ -86,11 +124,11 @@ func jacAddAffine(r, p *jacobian, q *affinePoint) {
 		}
 		return
 	}
-	rr.add(&rr, &rr)
+	addVartime(&rr, &rr, &rr)
 	var hh, i, j, v, x3, y3, z3 fieldElement
 	hh.square(&h)
-	i.add(&hh, &hh)
-	i.add(&i, &i)
+	addVartime(&i, &hh, &hh)
+	addVartime(&i, &i, &i)
 	j.mul(&h, &i)
 	v.mul(&p.x, &i)
 	x3.square(&rr)
@@ -100,7 +138,7 @@ func jacAddAffine(r, p *jacobian, q *affinePoint) {
 	y3.sub(&v, &x3)
 	y3.mul(&y3, &rr)
 	j.mul(&j, &p.y)
-	j.add(&j, &j)
+	addVartime(&j, &j, &j)
 	y3.sub(&y3, &j)
 	z3.add(&p.z, &h)
 	z3.square(&z3)
@@ -138,9 +176,9 @@ func jacAdd(r, p, q *jacobian) {
 		}
 		return
 	}
-	rr.add(&rr, &rr)
+	addVartime(&rr, &rr, &rr)
 	var i, j, v, x3, y3, z3 fieldElement
-	i.add(&h, &h)
+	addVartime(&i, &h, &h)
 	i.square(&i)
 	j.mul(&h, &i)
 	v.mul(&u1, &i)
@@ -151,7 +189,7 @@ func jacAdd(r, p, q *jacobian) {
 	y3.sub(&v, &x3)
 	y3.mul(&y3, &rr)
 	s1.mul(&s1, &j)
-	s1.add(&s1, &s1)
+	addVartime(&s1, &s1, &s1)
 	y3.sub(&y3, &s1)
 	z3.add(&p.z, &q.z)
 	z3.square(&z3)
@@ -491,7 +529,7 @@ func linearCombinationVartime(out *point, u1, u2 *scalar, q *point) {
 // the identity or a doubling), which cannot occur for a point of the
 // prime-order group but are handled by the caller's generic fallback.
 func coZOddMultiples(t *[1 << (glvWindowQ - 2)]affinePoint, Z *fieldElement, q *affinePoint) bool {
-	// d = 2q (Jacobian, d.z = 2·y_q).
+	// d = 2q (Jacobian; with the halved doubling d.z = y_q).
 	var d jacobian
 	jacDouble(&d, &jacobian{x: q.x, y: q.y, z: fieldOne})
 	if d.inf || d.z.isZero() == 1 {
@@ -547,11 +585,11 @@ func jacAddAffineZR(r *jacobian, zr *fieldElement, p *jacobian, q *affinePoint) 
 		return false
 	}
 	rr.sub(&s2, &p.y)
-	rr.add(&rr, &rr)
+	addVartime(&rr, &rr, &rr)
 	var hh, i, j, v, x3, y3 fieldElement
 	hh.square(&h)
-	i.add(&hh, &hh)
-	i.add(&i, &i)
+	addVartime(&i, &hh, &hh)
+	addVartime(&i, &i, &i)
 	j.mul(&h, &i)
 	v.mul(&p.x, &i)
 	x3.square(&rr)
@@ -561,9 +599,9 @@ func jacAddAffineZR(r *jacobian, zr *fieldElement, p *jacobian, q *affinePoint) 
 	y3.sub(&v, &x3)
 	y3.mul(&y3, &rr)
 	j.mul(&j, &p.y)
-	j.add(&j, &j)
+	addVartime(&j, &j, &j)
 	y3.sub(&y3, &j)
-	zr.add(&h, &h) // z3 = 2·z1·h
+	addVartime(zr, &h, &h) // z3 = 2·z1·h
 	r.z.mul(&p.z, zr)
 	r.x, r.y, r.inf = x3, y3, false
 	return true
@@ -601,11 +639,11 @@ func jacAddZinv(r, p *jacobian, b *affinePoint, bz *fieldElement) {
 		}
 		return
 	}
-	rr.add(&rr, &rr)
+	addVartime(&rr, &rr, &rr)
 	var hh, i, j, v, x3, y3, z3 fieldElement
 	hh.square(&h)
-	i.add(&hh, &hh)
-	i.add(&i, &i)
+	addVartime(&i, &hh, &hh)
+	addVartime(&i, &i, &i)
 	j.mul(&h, &i)
 	v.mul(&p.x, &i)
 	x3.square(&rr)
@@ -615,10 +653,10 @@ func jacAddZinv(r, p *jacobian, b *affinePoint, bz *fieldElement) {
 	y3.sub(&v, &x3)
 	y3.mul(&y3, &rr)
 	j.mul(&j, &p.y)
-	j.add(&j, &j)
+	addVartime(&j, &j, &j)
 	y3.sub(&y3, &j)
 	z3.mul(&p.z, &h)
-	z3.add(&z3, &z3)
+	addVartime(&z3, &z3, &z3)
 	r.x, r.y, r.z, r.inf = x3, y3, z3, false
 }
 

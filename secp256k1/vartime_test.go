@@ -267,3 +267,37 @@ func TestLinearCombinationEffectiveAffine(t *testing.T) {
 		}
 	}
 }
+
+// addVartime and halfVartime against the constant-time arithmetic,
+// including the values next to p where the reduction branch is taken.
+func TestAddHalfVartime(t *testing.T) {
+	rng := rand.New(rand.NewSource(74))
+	pm := func(k uint64) fieldElement {
+		return fieldElement{v: limbs{fieldP.m[0] - k, fieldP.m[1], fieldP.m[2], fieldP.m[3]}}
+	}
+	vals := []fieldElement{{}, fieldFromUint(1), fieldFromUint(2), pm(1), pm(2), pm(1 << 40)}
+	for i := 0; i < 2000; i++ {
+		var b [32]byte
+		rng.Read(b[:])
+		var f fieldElement
+		f.setBytes(&b)
+		vals = append(vals, f)
+	}
+	for i := range vals {
+		for j := 0; j < len(vals); j += 97 {
+			x, y := vals[i], vals[(i+j)%len(vals)]
+			var a, b fieldElement
+			addVartime(&a, &x, &y)
+			b.add(&x, &y)
+			if a.equal(&b) != 1 {
+				t.Fatalf("addVartime(%x, %x)", x.v, y.v)
+			}
+		}
+		var h, two fieldElement
+		h.halfVartime(&vals[i])
+		two.add(&h, &h)
+		if two.equal(&vals[i]) != 1 {
+			t.Fatalf("halfVartime(%x)", vals[i].v)
+		}
+	}
+}

@@ -79,15 +79,13 @@ func (z *scalar) neg(x *scalar) *scalar    { scalarN.neg(&z.v, &x.v); return z }
 
 // mul sets z = x·y (Montgomery product mod n).
 func (z *scalar) mul(x, y *scalar) *scalar {
-	t0, t1, t2, t3, t4, t5, t6, t7 := mulWords(&x.v, &y.v)
-	montReduceN(&z.v, t0, t1, t2, t3, t4, t5, t6, t7)
+	scalarMul(&z.v, &x.v, &y.v, &scalarN.m)
 	return z
 }
 
 // square sets z = x^2 (Montgomery form).
 func (z *scalar) square(x *scalar) *scalar {
-	t0, t1, t2, t3, t4, t5, t6, t7 := sqrWords(&x.v)
-	montReduceN(&z.v, t0, t1, t2, t3, t4, t5, t6, t7)
+	scalarSqr(&z.v, &x.v, &scalarN.m)
 	return z
 }
 

@@ -25,11 +25,18 @@ import (
 var asmAllowed = map[string]bool{
 	"MOVQ": true, "MOVL": true, "MULQ": true, "MULXQ": true,
 	"ADDQ": true, "ADCQ": true, "ADCXQ": true, "ADOXQ": true,
-	"SBBQ": true, "ANDQ": true, "XORQ": true, "CMOVQCS": true,
+	"SBBQ": true, "SUBQ": true, "ANDQ": true, "XORQ": true, "IMULQ": true,
+	"CMOVQCS": true, "CMOVQCC": true,
 	"RET": true,
 	// CPUID only in ·cpuid; the dispatch only in ·fieldMul/·fieldSqr
 	// (checked below).
 	"CPUID": true, "CMPB": true, "JEQ": true, "JMP": true,
+}
+
+// dispatchStub lists the functions that select the implementation.
+var dispatchStub = map[string]bool{
+	"·fieldMul(SB),": true, "·fieldSqr(SB),": true,
+	"·scalarMul(SB),": true, "·scalarSqr(SB),": true,
 }
 
 // TestFieldAsmSourceIsStraightLine reads field_amd64.s (on every
@@ -38,8 +45,8 @@ var asmAllowed = map[string]bool{
 //     division, or table instruction);
 //   - the only conditional jump in the file is the CPU dispatch "JEQ
 //     portable", immediately after "CMPB ·useADX(SB), $0", and only in
-//     ·fieldMul and ·fieldSqr; JMP only tail-jumps to the two
-//     implementations there;
+//     the dispatch stubs (·fieldMul, ·fieldSqr, ·scalarMul, ·scalarSqr);
+//     JMP only tail-jumps to the two implementations there;
 //   - memory operands are only base+offset through the argument pointers
 //     (SI, DI), the argument frame (FP) or the symbol useADX — never an
 //     indexed address, so no address depends on data;
@@ -107,14 +114,16 @@ func TestFieldAsmSourceIsStraightLine(t *testing.T) {
 				condJumps++
 				if stmt != "JEQ  portable" && stmt != "JEQ portable" ||
 					prev != "CMPB ·useADX(SB), $0" ||
-					(fn != "·fieldMul(SB)," && fn != "·fieldSqr(SB),") {
+					!dispatchStub[fn] {
 					t.Errorf("%s: conditional jump other than the CPU dispatch", where)
 				}
 			case "JMP":
 				target := strings.Fields(stmt)[1]
 				ok := map[string]map[string]bool{
-					"·fieldMul(SB),": {"·fieldMulADX(SB)": true, "·fieldMulMULQ(SB)": true},
-					"·fieldSqr(SB),": {"·fieldSqrADX(SB)": true, "·fieldSqrMULQ(SB)": true},
+					"·fieldMul(SB),":  {"·fieldMulADX(SB)": true, "·fieldMulMULQ(SB)": true},
+					"·fieldSqr(SB),":  {"·fieldSqrADX(SB)": true, "·fieldSqrMULQ(SB)": true},
+					"·scalarMul(SB),": {"·scalarMulADX(SB)": true, "·scalarMulMULQ(SB)": true},
+					"·scalarSqr(SB),": {"·scalarSqrADX(SB)": true, "·scalarSqrMULQ(SB)": true},
 				}[fn][target]
 				if !ok {
 					t.Errorf("%s: jump other than the dispatch tail jump", where)
@@ -123,8 +132,8 @@ func TestFieldAsmSourceIsStraightLine(t *testing.T) {
 			prev = stmt
 		}
 	}
-	if condJumps != 2 {
-		t.Fatalf("expected exactly 2 dispatch jumps, found %d", condJumps)
+	if condJumps != len(dispatchStub) {
+		t.Fatalf("expected exactly %d dispatch jumps, found %d", len(dispatchStub), condJumps)
 	}
 }
 
@@ -159,7 +168,8 @@ func TestCompiledFieldAsmIsStraightLine(t *testing.T) {
 	}
 	want := map[string]int{ // function -> allowed conditional jumps
 		"fieldMulADX": 0, "fieldSqrADX": 0, "fieldMulMULQ": 0, "fieldSqrMULQ": 0,
-		"fieldMul": 1, "fieldSqr": 1,
+		"scalarMulADX": 0, "scalarSqrADX": 0, "scalarMulMULQ": 0, "scalarSqrMULQ": 0,
+		"fieldMul": 1, "fieldSqr": 1, "scalarMul": 1, "scalarSqr": 1,
 	}
 	jump := regexp.MustCompile(`\tj([a-z]+)\s`)
 	found := 0

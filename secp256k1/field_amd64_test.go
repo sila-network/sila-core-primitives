@@ -84,3 +84,67 @@ func TestFieldAsmMatchesGo(t *testing.T) {
 		}
 	}
 }
+
+// TestScalarAsmMatchesGo checks the scalar Montgomery assembly (MULX/ADX
+// when available, and MULQ) against the portable Go code (mulWords /
+// sqrWords + montReduceN): edge values next to n and to word boundaries,
+// random values, and aliasing.
+func TestScalarAsmMatchesGo(t *testing.T) {
+	n := scalarN.m
+	nm1 := limbs{n[0] - 1, n[1], n[2], n[3]}
+	vals := []limbs{
+		{}, {1}, {2}, nm1, {n[0] - 2, n[1], n[2], n[3]},
+		{^uint64(0), 0, 0, 0}, {0, ^uint64(0), 0, 0},
+		{^uint64(0), ^uint64(0), ^uint64(0), 0},
+		{0, 0, 0, 1 << 63}, scalarN.one, scalarN.r2,
+	}
+	var b [32]byte
+	for len(vals) < 20000 {
+		if _, err := rand.Read(b[:]); err != nil {
+			t.Fatal(err)
+		}
+		var s scalar
+		if s.setBytesCanonical(&b) == 1 {
+			vals = append(vals, s.v)
+		}
+	}
+	goMul := func(x, y *limbs) limbs {
+		var z limbs
+		t0, t1, t2, t3, t4, t5, t6, t7 := mulWords(x, y)
+		montReduceN(&z, t0, t1, t2, t3, t4, t5, t6, t7)
+		return z
+	}
+	type impl struct {
+		name string
+		mul  func(z, x, y, n *limbs)
+		sqr  func(z, x, n *limbs)
+	}
+	impls := []impl{{"MULQ", scalarMulMULQ, scalarSqrMULQ}, {"dispatch", scalarMul, scalarSqr}}
+	if useADX {
+		impls = append(impls, impl{"ADX", scalarMulADX, scalarSqrADX})
+	}
+	for _, im := range impls {
+		for i := range vals {
+			x := vals[i]
+			y := vals[(i*7919+3)%len(vals)]
+			want := goMul(&x, &y)
+			wantSq := goMul(&x, &x)
+			var z limbs
+			im.mul(&z, &x, &y, &n)
+			if z != want {
+				t.Fatalf("%s mul(%x, %x) = %x, want %x", im.name, x, y, z, want)
+			}
+			im.sqr(&z, &x, &n)
+			if z != wantSq {
+				t.Fatalf("%s sqr(%x) = %x, want %x", im.name, x, z, wantSq)
+			}
+			a, c, d := x, y, x
+			im.mul(&a, &a, &y, &n)
+			im.mul(&c, &x, &c, &n)
+			im.sqr(&d, &d, &n)
+			if a != want || c != want || d != wantSq {
+				t.Fatalf("%s: aliasing changes the result for %x, %x", im.name, x, y)
+			}
+		}
+	}
+}

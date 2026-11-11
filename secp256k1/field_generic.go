@@ -17,3 +17,16 @@ func fieldSqr(z, x *limbs) {
 	t0, t1, t2, t3, t4, t5, t6, t7 := sqrWords(x)
 	reduceWords(z, t0, t1, t2, t3, t4, t5, t6, t7)
 }
+
+// scalarMul sets z = x·y·2^-256 mod n (Montgomery product; portable Go).
+// n is the group order (the parameter mirrors the amd64 assembly).
+func scalarMul(z, x, y, _ *limbs) {
+	t0, t1, t2, t3, t4, t5, t6, t7 := mulWords(x, y)
+	montReduceN(z, t0, t1, t2, t3, t4, t5, t6, t7)
+}
+
+// scalarSqr sets z = x^2·2^-256 mod n.
+func scalarSqr(z, x, _ *limbs) {
+	t0, t1, t2, t3, t4, t5, t6, t7 := sqrWords(x)
+	montReduceN(z, t0, t1, t2, t3, t4, t5, t6, t7)
+}

@@ -43,3 +43,24 @@ var useADX = func() bool {
 
 // cpuid is implemented in field_amd64.s.
 func cpuid(leaf, subleaf uint32) (eax, ebx, ecx, edx uint32)
+
+// Scalar Montgomery multiplication and squaring modulo n (field_amd64.s):
+// z = x·y·2^-256 mod n for x, y < n; n points to the modulus limbs.
+
+//go:noescape
+func scalarMul(z, x, y, n *limbs)
+
+//go:noescape
+func scalarSqr(z, x, n *limbs)
+
+//go:noescape
+func scalarMulADX(z, x, y, n *limbs)
+
+//go:noescape
+func scalarSqrADX(z, x, n *limbs)
+
+//go:noescape
+func scalarMulMULQ(z, x, y, n *limbs)
+
+//go:noescape
+func scalarSqrMULQ(z, x, n *limbs)

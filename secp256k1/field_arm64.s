@@ -128,29 +128,28 @@ TEXT ·fieldMul(SB), NOSPLIT, $0-24
 	ADCS R22, R13, R13
 	ADCS R23, R14, R14
 	ADC R24, R20, R20
-	// Second fold: r4·c < 2^68.
-	MUL R25, R20, R21
-	UMULH R25, R20, R22
-	ADDS R21, R11, R11
-	ADCS R22, R12, R12
-	ADCS ZR, R13, R13
-	ADCS ZR, R14, R14
-	// A carry out is worth c; the sum is then small and cannot carry again.
-	CSEL CS, R25, ZR, R21
-	ADDS R21, R11, R11
-	ADCS ZR, R12, R12
-	ADCS ZR, R13, R13
-	ADC ZR, R14, R14
-	// Final correction (value < 2p): t - p = t + c mod 2^256, taken
-	// exactly when t + c carries.
-	ADDS R25, R11, R21
-	ADCS ZR, R12, R22
+	// Second fold and final correction, as two independent sums:
+	// v = t + r4·c and u = t + (r4 + 1)·c = v + c, with r4 < 2^34.
+	// v < 2^256 + 2^68, so v >= p exactly when u >= 2^256 (u carries
+	// out of four words), and then v - p = u mod 2^256 < p; otherwise
+	// v < p and the result is v.
+	ADD $1, R20, R0
+	MUL R25, R20, R1
+	UMULH R25, R20, R2
+	MUL R25, R0, R7
+	UMULH R25, R0, R8
+	ADDS R1, R11, R9
+	ADCS R2, R12, R10
+	ADCS ZR, R13, R1
+	ADC ZR, R14, R2
+	ADDS R7, R11, R21
+	ADCS R8, R12, R22
 	ADCS ZR, R13, R23
 	ADCS ZR, R14, R24
-	CSEL CS, R21, R11, R11
-	CSEL CS, R22, R12, R12
-	CSEL CS, R23, R13, R13
-	CSEL CS, R24, R14, R14
+	CSEL CS, R21, R9, R11
+	CSEL CS, R22, R10, R12
+	CSEL CS, R23, R1, R13
+	CSEL CS, R24, R2, R14
 	MOVD z+0(FP), R0
 	STP (R11, R12), (R0)
 	STP (R13, R14), 16(R0)
@@ -230,29 +229,28 @@ TEXT ·fieldSqr(SB), NOSPLIT, $0-16
 	ADCS R22, R13, R13
 	ADCS R23, R14, R14
 	ADC R24, R20, R20
-	// Second fold: r4·c < 2^68.
-	MUL R25, R20, R21
-	UMULH R25, R20, R22
-	ADDS R21, R11, R11
-	ADCS R22, R12, R12
-	ADCS ZR, R13, R13
-	ADCS ZR, R14, R14
-	// A carry out is worth c; the sum is then small and cannot carry again.
-	CSEL CS, R25, ZR, R21
-	ADDS R21, R11, R11
-	ADCS ZR, R12, R12
-	ADCS ZR, R13, R13
-	ADC ZR, R14, R14
-	// Final correction (value < 2p): t - p = t + c mod 2^256, taken
-	// exactly when t + c carries.
-	ADDS R25, R11, R21
-	ADCS ZR, R12, R22
+	// Second fold and final correction, as two independent sums:
+	// v = t + r4·c and u = t + (r4 + 1)·c = v + c, with r4 < 2^34.
+	// v < 2^256 + 2^68, so v >= p exactly when u >= 2^256 (u carries
+	// out of four words), and then v - p = u mod 2^256 < p; otherwise
+	// v < p and the result is v.
+	ADD $1, R20, R0
+	MUL R25, R20, R1
+	UMULH R25, R20, R2
+	MUL R25, R0, R7
+	UMULH R25, R0, R8
+	ADDS R1, R11, R9
+	ADCS R2, R12, R10
+	ADCS ZR, R13, R1
+	ADC ZR, R14, R2
+	ADDS R7, R11, R21
+	ADCS R8, R12, R22
 	ADCS ZR, R13, R23
 	ADCS ZR, R14, R24
-	CSEL CS, R21, R11, R11
-	CSEL CS, R22, R12, R12
-	CSEL CS, R23, R13, R13
-	CSEL CS, R24, R14, R14
+	CSEL CS, R21, R9, R11
+	CSEL CS, R22, R10, R12
+	CSEL CS, R23, R1, R13
+	CSEL CS, R24, R2, R14
 	MOVD z+0(FP), R0
 	STP (R11, R12), (R0)
 	STP (R13, R14), 16(R0)

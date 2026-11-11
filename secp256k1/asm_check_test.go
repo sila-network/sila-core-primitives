@@ -226,7 +226,7 @@ func TestCompiledFieldAsmIsStraightLine(t *testing.T) {
 var arm64Allowed = map[string]bool{
 	"MOVD": true, "MOVK": true, "LDP": true, "STP": true,
 	"MUL": true, "UMULH": true,
-	"ADDS": true, "ADCS": true, "ADC": true, "SUBS": true, "SBCS": true,
+	"ADD": true, "ADDS": true, "ADCS": true, "ADC": true, "SUBS": true, "SBCS": true,
 	"CSEL": true, "RET": true,
 	// NEON for the table scan: loads/stores (post-increment by a constant),
 	// broadcast, lane comparison and logic.

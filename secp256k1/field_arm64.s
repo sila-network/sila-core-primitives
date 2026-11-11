@@ -18,11 +18,15 @@
 // independent timing under PSTATE.DIT (Arm DIT list), which Sign and
 // PublicKey enable on processors with FEAT_DIT (Go >= 1.24). All inputs
 // are loaded before any output is stored, so z may alias x or y.
-// Squaring computes the six cross products once, doubles them and adds
-// the four squares (20 instead of 32 MUL/UMULH).
+// The 512-bit product is formed from four independent 2x2-word products
+// (x_lo·y_lo, x_hi·y_hi, x_lo·y_hi, x_hi·y_lo), whose carry chains do not
+// depend on each other, then summed; the square from lo^2, hi^2 and the
+// doubled cross product lo·hi (20 instead of 32 MUL/UMULH).
 //
 // Registers: R3..R6 = x, R7..R10 = y (then n and m in the reduction),
-// R11..R17, R19, R20 = t0..t8, R21..R24 temporaries, R25 the constant.
+// R11..R17, R19, R20 = t0..t8, R20..R24 the middle sum and temporaries,
+// R0..R2 and R25 scratch during the product (the output pointer is
+// reloaded from the frame), R25 then the reduction constant.
 // R18 (platform), R26..R30 are not used.
 
 // func fieldMul(z, x, y *limbs)
@@ -33,74 +37,76 @@ TEXT ·fieldMul(SB), NOSPLIT, $0-24
 	LDP 16(R1), (R5, R6)
 	LDP (R2), (R7, R8)
 	LDP 16(R2), (R9, R10)
-	// Row 0: t0..t4 = x0·y (low halves, then high halves one word up).
+	// LL = x_lo·y_lo -> t0..t3, HH = x_hi·y_hi -> t4..t7.
 	MUL R7, R3, R11
-	MUL R8, R3, R12
-	MUL R9, R3, R13
-	MUL R10, R3, R14
-	MOVD ZR, R15
-	UMULH R7, R3, R21
-	UMULH R8, R3, R22
-	UMULH R9, R3, R23
-	UMULH R10, R3, R24
-	ADDS R21, R12, R12
-	ADCS R22, R13, R13
-	ADCS R23, R14, R14
-	ADC R24, R15, R15
-	// Row 1: t1..t5 += x1·y.
-	MUL R7, R4, R21
-	MUL R8, R4, R22
-	MUL R9, R4, R23
-	MUL R10, R4, R24
-	ADDS R21, R12, R12
-	ADCS R22, R13, R13
-	ADCS R23, R14, R14
-	ADCS R24, R15, R15
-	ADC ZR, ZR, R16
-	UMULH R7, R4, R21
-	UMULH R8, R4, R22
-	UMULH R9, R4, R23
-	UMULH R10, R4, R24
-	ADDS R21, R13, R13
-	ADCS R22, R14, R14
-	ADCS R23, R15, R15
-	ADC R24, R16, R16
-	// Row 2: t2..t6 += x2·y.
-	MUL R7, R5, R21
-	MUL R8, R5, R22
-	MUL R9, R5, R23
+	UMULH R7, R3, R0
+	MUL R8, R3, R1
+	UMULH R8, R3, R2
+	MUL R8, R4, R13
+	UMULH R8, R4, R14
+	ADDS R1, R0, R12
+	ADCS R2, R13, R13
+	ADC ZR, R14, R14
+	MUL R7, R4, R1
+	UMULH R7, R4, R2
+	ADDS R1, R12, R12
+	ADCS R2, R13, R13
+	ADC ZR, R14, R14
+	MUL R9, R5, R15
+	UMULH R9, R5, R25
 	MUL R10, R5, R24
-	ADDS R21, R13, R13
-	ADCS R22, R14, R14
-	ADCS R23, R15, R15
-	ADCS R24, R16, R16
-	ADC ZR, ZR, R17
-	UMULH R7, R5, R21
-	UMULH R8, R5, R22
-	UMULH R9, R5, R23
-	UMULH R10, R5, R24
-	ADDS R21, R14, R14
-	ADCS R22, R15, R15
-	ADCS R23, R16, R16
-	ADC R24, R17, R17
-	// Row 3: t3..t7 += x3·y.
-	MUL R7, R6, R21
-	MUL R8, R6, R22
-	MUL R9, R6, R23
-	MUL R10, R6, R24
-	ADDS R21, R14, R14
+	UMULH R10, R5, R0
+	MUL R10, R6, R17
+	UMULH R10, R6, R19
+	ADDS R24, R25, R16
+	ADCS R0, R17, R17
+	ADC ZR, R19, R19
+	MUL R9, R6, R24
+	UMULH R9, R6, R0
+	ADDS R24, R16, R16
+	ADCS R0, R17, R17
+	ADC ZR, R19, R19
+	// M = x_lo·y_hi + x_hi·y_lo (five words).
+	MUL R9, R3, R20
+	UMULH R9, R3, R0
+	MUL R10, R3, R1
+	UMULH R10, R3, R2
+	MUL R10, R4, R22
+	UMULH R10, R4, R23
+	ADDS R1, R0, R21
+	ADCS R2, R22, R22
+	ADC ZR, R23, R23
+	MUL R9, R4, R1
+	UMULH R9, R4, R2
+	ADDS R1, R21, R21
+	ADCS R2, R22, R22
+	ADC ZR, R23, R23
+	MUL R7, R5, R3
+	UMULH R7, R5, R0
+	MUL R8, R5, R1
+	UMULH R8, R5, R2
+	MUL R8, R6, R9
+	UMULH R8, R6, R10
+	ADDS R1, R0, R4
+	ADCS R2, R9, R9
+	ADC ZR, R10, R10
+	MUL R7, R6, R1
+	UMULH R7, R6, R2
+	ADDS R1, R4, R4
+	ADCS R2, R9, R9
+	ADC ZR, R10, R10
+	ADDS R3, R20, R20
+	ADCS R4, R21, R21
+	ADCS R9, R22, R22
+	ADCS R10, R23, R23
+	ADC ZR, ZR, R24
+	// t2..t7 += M.
+	ADDS R20, R13, R13
+	ADCS R21, R14, R14
 	ADCS R22, R15, R15
 	ADCS R23, R16, R16
 	ADCS R24, R17, R17
-	ADC ZR, ZR, R19
-	UMULH R7, R6, R21
-	UMULH R8, R6, R22
-	UMULH R9, R6, R23
-	UMULH R10, R6, R24
-	ADDS R21, R15, R15
-	ADCS R22, R16, R16
-	ADCS R23, R17, R17
-	ADC R24, R19, R19
+	ADC ZR, R19, R19
 	// Reduction modulo p: fold t4..t7 with 2^256 ≡ c = 0x1000003D1; the top
 	// word r4 < 2^34 goes to t8.
 	MOVD $0x1000003D1, R25
@@ -154,55 +160,56 @@ TEXT ·fieldSqr(SB), NOSPLIT, $0-16
 	MOVD x+8(FP), R1
 	LDP (R1), (R3, R4)
 	LDP 16(R1), (R5, R6)
-	// Cross products x0·x1, x0·x2, x0·x3 at words 1..4.
-	MUL R4, R3, R12
-	UMULH R4, R3, R7
-	MUL R5, R3, R8
-	UMULH R5, R3, R9
-	MUL R6, R3, R10
-	UMULH R6, R3, R21
-	ADDS R8, R7, R13
-	ADCS R10, R9, R14
-	ADC ZR, R21, R15
-	// x1·x2 at words 3..4, x1·x3 at 4..5, x2·x3 at 5..6.
-	MUL R5, R4, R7
-	UMULH R5, R4, R8
-	MUL R6, R4, R9
-	UMULH R6, R4, R10
-	MUL R6, R5, R21
-	UMULH R6, R5, R22
-	ADDS R7, R14, R14
-	ADCS R8, R15, R15
-	ADC ZR, ZR, R16
-	ADDS R9, R15, R15
-	ADCS R10, R16, R16
-	ADC ZR, ZR, R17
-	ADDS R21, R16, R16
-	ADC R22, R17, R17
-	// Double the cross products (t7 receives the top bit).
-	ADDS R12, R12, R12
-	ADCS R13, R13, R13
-	ADCS R14, R14, R14
-	ADCS R15, R15, R15
-	ADCS R16, R16, R16
-	ADCS R17, R17, R17
-	ADC ZR, ZR, R19
-	// Add the squares x_i^2 at words 2i, 2i+1.
+	// lo^2 -> t0..t3, hi^2 -> t4..t7, M = 2·lo·hi (five words).
+	MUL R4, R3, R0
+	UMULH R4, R3, R1
 	MUL R3, R3, R11
-	UMULH R3, R3, R7
-	MUL R4, R4, R8
-	UMULH R4, R4, R9
-	MUL R5, R5, R10
-	UMULH R5, R5, R21
-	MUL R6, R6, R22
-	UMULH R6, R6, R23
-	ADDS R7, R12, R12
-	ADCS R8, R13, R13
-	ADCS R9, R14, R14
-	ADCS R10, R15, R15
-	ADCS R21, R16, R16
-	ADCS R22, R17, R17
-	ADC R23, R19, R19
+	UMULH R3, R3, R12
+	MUL R4, R4, R13
+	UMULH R4, R4, R14
+	ADDS R0, R12, R12
+	ADCS R1, R13, R13
+	ADC ZR, R14, R14
+	ADDS R0, R12, R12
+	ADCS R1, R13, R13
+	ADC ZR, R14, R14
+	MUL R6, R5, R2
+	UMULH R6, R5, R25
+	MUL R5, R5, R15
+	UMULH R5, R5, R16
+	MUL R6, R6, R17
+	UMULH R6, R6, R19
+	ADDS R2, R16, R16
+	ADCS R25, R17, R17
+	ADC ZR, R19, R19
+	ADDS R2, R16, R16
+	ADCS R25, R17, R17
+	ADC ZR, R19, R19
+	MUL R5, R3, R20
+	UMULH R5, R3, R0
+	MUL R6, R3, R1
+	UMULH R6, R3, R2
+	MUL R6, R4, R22
+	UMULH R6, R4, R23
+	ADDS R1, R0, R21
+	ADCS R2, R22, R22
+	ADC ZR, R23, R23
+	MUL R5, R4, R1
+	UMULH R5, R4, R2
+	ADDS R1, R21, R21
+	ADCS R2, R22, R22
+	ADC ZR, R23, R23
+	ADDS R20, R20, R20
+	ADCS R21, R21, R21
+	ADCS R22, R22, R22
+	ADCS R23, R23, R23
+	ADC ZR, ZR, R24
+	ADDS R20, R13, R13
+	ADCS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADC ZR, R19, R19
 	// Reduction modulo p: fold t4..t7 with 2^256 ≡ c = 0x1000003D1; the top
 	// word r4 < 2^34 goes to t8.
 	MOVD $0x1000003D1, R25
@@ -259,74 +266,76 @@ TEXT ·scalarMul(SB), NOSPLIT, $0-32
 	LDP 16(R1), (R5, R6)
 	LDP (R2), (R7, R8)
 	LDP 16(R2), (R9, R10)
-	// Row 0: t0..t4 = x0·y (low halves, then high halves one word up).
+	// LL = x_lo·y_lo -> t0..t3, HH = x_hi·y_hi -> t4..t7.
 	MUL R7, R3, R11
-	MUL R8, R3, R12
-	MUL R9, R3, R13
-	MUL R10, R3, R14
-	MOVD ZR, R15
-	UMULH R7, R3, R21
-	UMULH R8, R3, R22
-	UMULH R9, R3, R23
-	UMULH R10, R3, R24
-	ADDS R21, R12, R12
-	ADCS R22, R13, R13
-	ADCS R23, R14, R14
-	ADC R24, R15, R15
-	// Row 1: t1..t5 += x1·y.
-	MUL R7, R4, R21
-	MUL R8, R4, R22
-	MUL R9, R4, R23
-	MUL R10, R4, R24
-	ADDS R21, R12, R12
-	ADCS R22, R13, R13
-	ADCS R23, R14, R14
-	ADCS R24, R15, R15
-	ADC ZR, ZR, R16
-	UMULH R7, R4, R21
-	UMULH R8, R4, R22
-	UMULH R9, R4, R23
-	UMULH R10, R4, R24
-	ADDS R21, R13, R13
-	ADCS R22, R14, R14
-	ADCS R23, R15, R15
-	ADC R24, R16, R16
-	// Row 2: t2..t6 += x2·y.
-	MUL R7, R5, R21
-	MUL R8, R5, R22
-	MUL R9, R5, R23
+	UMULH R7, R3, R0
+	MUL R8, R3, R1
+	UMULH R8, R3, R2
+	MUL R8, R4, R13
+	UMULH R8, R4, R14
+	ADDS R1, R0, R12
+	ADCS R2, R13, R13
+	ADC ZR, R14, R14
+	MUL R7, R4, R1
+	UMULH R7, R4, R2
+	ADDS R1, R12, R12
+	ADCS R2, R13, R13
+	ADC ZR, R14, R14
+	MUL R9, R5, R15
+	UMULH R9, R5, R25
 	MUL R10, R5, R24
-	ADDS R21, R13, R13
-	ADCS R22, R14, R14
-	ADCS R23, R15, R15
-	ADCS R24, R16, R16
-	ADC ZR, ZR, R17
-	UMULH R7, R5, R21
-	UMULH R8, R5, R22
-	UMULH R9, R5, R23
-	UMULH R10, R5, R24
-	ADDS R21, R14, R14
-	ADCS R22, R15, R15
-	ADCS R23, R16, R16
-	ADC R24, R17, R17
-	// Row 3: t3..t7 += x3·y.
-	MUL R7, R6, R21
-	MUL R8, R6, R22
-	MUL R9, R6, R23
-	MUL R10, R6, R24
-	ADDS R21, R14, R14
+	UMULH R10, R5, R0
+	MUL R10, R6, R17
+	UMULH R10, R6, R19
+	ADDS R24, R25, R16
+	ADCS R0, R17, R17
+	ADC ZR, R19, R19
+	MUL R9, R6, R24
+	UMULH R9, R6, R0
+	ADDS R24, R16, R16
+	ADCS R0, R17, R17
+	ADC ZR, R19, R19
+	// M = x_lo·y_hi + x_hi·y_lo (five words).
+	MUL R9, R3, R20
+	UMULH R9, R3, R0
+	MUL R10, R3, R1
+	UMULH R10, R3, R2
+	MUL R10, R4, R22
+	UMULH R10, R4, R23
+	ADDS R1, R0, R21
+	ADCS R2, R22, R22
+	ADC ZR, R23, R23
+	MUL R9, R4, R1
+	UMULH R9, R4, R2
+	ADDS R1, R21, R21
+	ADCS R2, R22, R22
+	ADC ZR, R23, R23
+	MUL R7, R5, R3
+	UMULH R7, R5, R0
+	MUL R8, R5, R1
+	UMULH R8, R5, R2
+	MUL R8, R6, R9
+	UMULH R8, R6, R10
+	ADDS R1, R0, R4
+	ADCS R2, R9, R9
+	ADC ZR, R10, R10
+	MUL R7, R6, R1
+	UMULH R7, R6, R2
+	ADDS R1, R4, R4
+	ADCS R2, R9, R9
+	ADC ZR, R10, R10
+	ADDS R3, R20, R20
+	ADCS R4, R21, R21
+	ADCS R9, R22, R22
+	ADCS R10, R23, R23
+	ADC ZR, ZR, R24
+	// t2..t7 += M.
+	ADDS R20, R13, R13
+	ADCS R21, R14, R14
 	ADCS R22, R15, R15
 	ADCS R23, R16, R16
 	ADCS R24, R17, R17
-	ADC ZR, ZR, R19
-	UMULH R7, R6, R21
-	UMULH R8, R6, R22
-	UMULH R9, R6, R23
-	UMULH R10, R6, R24
-	ADDS R21, R15, R15
-	ADCS R22, R16, R16
-	ADCS R23, R17, R17
-	ADC R24, R19, R19
+	ADC ZR, R19, R19
 	// Montgomery reduction modulo n: four rows m = t_i·(-n^-1) mod 2^64,
 	// t += m·n·2^(64i); t8 collects the top carries.
 	MOVD n+24(FP), R2
@@ -451,55 +460,56 @@ TEXT ·scalarSqr(SB), NOSPLIT, $0-24
 	MOVD x+8(FP), R1
 	LDP (R1), (R3, R4)
 	LDP 16(R1), (R5, R6)
-	// Cross products x0·x1, x0·x2, x0·x3 at words 1..4.
-	MUL R4, R3, R12
-	UMULH R4, R3, R7
-	MUL R5, R3, R8
-	UMULH R5, R3, R9
-	MUL R6, R3, R10
-	UMULH R6, R3, R21
-	ADDS R8, R7, R13
-	ADCS R10, R9, R14
-	ADC ZR, R21, R15
-	// x1·x2 at words 3..4, x1·x3 at 4..5, x2·x3 at 5..6.
-	MUL R5, R4, R7
-	UMULH R5, R4, R8
-	MUL R6, R4, R9
-	UMULH R6, R4, R10
-	MUL R6, R5, R21
-	UMULH R6, R5, R22
-	ADDS R7, R14, R14
-	ADCS R8, R15, R15
-	ADC ZR, ZR, R16
-	ADDS R9, R15, R15
-	ADCS R10, R16, R16
-	ADC ZR, ZR, R17
-	ADDS R21, R16, R16
-	ADC R22, R17, R17
-	// Double the cross products (t7 receives the top bit).
-	ADDS R12, R12, R12
-	ADCS R13, R13, R13
-	ADCS R14, R14, R14
-	ADCS R15, R15, R15
-	ADCS R16, R16, R16
-	ADCS R17, R17, R17
-	ADC ZR, ZR, R19
-	// Add the squares x_i^2 at words 2i, 2i+1.
+	// lo^2 -> t0..t3, hi^2 -> t4..t7, M = 2·lo·hi (five words).
+	MUL R4, R3, R0
+	UMULH R4, R3, R1
 	MUL R3, R3, R11
-	UMULH R3, R3, R7
-	MUL R4, R4, R8
-	UMULH R4, R4, R9
-	MUL R5, R5, R10
-	UMULH R5, R5, R21
-	MUL R6, R6, R22
-	UMULH R6, R6, R23
-	ADDS R7, R12, R12
-	ADCS R8, R13, R13
-	ADCS R9, R14, R14
-	ADCS R10, R15, R15
-	ADCS R21, R16, R16
-	ADCS R22, R17, R17
-	ADC R23, R19, R19
+	UMULH R3, R3, R12
+	MUL R4, R4, R13
+	UMULH R4, R4, R14
+	ADDS R0, R12, R12
+	ADCS R1, R13, R13
+	ADC ZR, R14, R14
+	ADDS R0, R12, R12
+	ADCS R1, R13, R13
+	ADC ZR, R14, R14
+	MUL R6, R5, R2
+	UMULH R6, R5, R25
+	MUL R5, R5, R15
+	UMULH R5, R5, R16
+	MUL R6, R6, R17
+	UMULH R6, R6, R19
+	ADDS R2, R16, R16
+	ADCS R25, R17, R17
+	ADC ZR, R19, R19
+	ADDS R2, R16, R16
+	ADCS R25, R17, R17
+	ADC ZR, R19, R19
+	MUL R5, R3, R20
+	UMULH R5, R3, R0
+	MUL R6, R3, R1
+	UMULH R6, R3, R2
+	MUL R6, R4, R22
+	UMULH R6, R4, R23
+	ADDS R1, R0, R21
+	ADCS R2, R22, R22
+	ADC ZR, R23, R23
+	MUL R5, R4, R1
+	UMULH R5, R4, R2
+	ADDS R1, R21, R21
+	ADCS R2, R22, R22
+	ADC ZR, R23, R23
+	ADDS R20, R20, R20
+	ADCS R21, R21, R21
+	ADCS R22, R22, R22
+	ADCS R23, R23, R23
+	ADC ZR, ZR, R24
+	ADDS R20, R13, R13
+	ADCS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADC ZR, R19, R19
 	// Montgomery reduction modulo n: four rows m = t_i·(-n^-1) mod 2^64,
 	// t += m·n·2^(64i); t8 collects the top carries.
 	MOVD n+16(FP), R2

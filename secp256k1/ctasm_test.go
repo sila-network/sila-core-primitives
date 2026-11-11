@@ -52,6 +52,8 @@ func TestCompiledConstantTimeFunctions(t *testing.T) {
 		`secp256k1\.\(\*scalar\)\.(mul|square|add|sub|neg|selectFrom|isHigh|isZero)`,
 		`secp256k1\.\(\*modulus\)\.(add|sub|neg|reduceOnce)`,
 		`secp256k1\.\(\*point\)\.(add|double|addMixed|selectFrom|neg)`,
+		// Constant-time divstep inversion (inv_ct.go, wide.go).
+		`secp256k1\.(linComb|linShr62|linShr62Mod|wideMulAdd|wideMulWord|wideAdd|wideSub)`,
 		// selectLimbs, lessThan, isZeroLimbs and equalLimbs are inlined
 		// into the functions above and checked as part of them.
 	}
@@ -81,6 +83,8 @@ func TestCompiledLoopsAreCounterBound(t *testing.T) {
 		`secp256k1\.\(\*scalar\)\.(inv|sqrN)`,
 		`secp256k1\.\(\*fieldElement\)\.(inv|sqrt|sqrN)`,
 		`secp256k1\.fieldPow2k1`,
+		`secp256k1\.divsteps62`,
+		`secp256k1\.modInverseCT`,
 	} {
 		funcs := objdump(t, bin, pat+`$`)
 		if len(funcs) == 0 {
@@ -88,6 +92,52 @@ func TestCompiledLoopsAreCounterBound(t *testing.T) {
 		}
 		for name, body := range funcs {
 			t.Logf("%s: %d conditional branch(es), all must be counter or public-index tests", name, dataBranches(body))
+		}
+	}
+}
+
+// TestCompiledInversionLoopsAreCounters checks the constant-time divstep
+// inversion strictly: apart from the prologue stack check, every
+// conditional branch must directly follow a comparison of a register with
+// an immediate (a loop counter against 62, 12 or a small array length),
+// never a test of data.
+func TestCompiledInversionLoopsAreCounters(t *testing.T) {
+	bin := ctTestBinary(t)
+	if arch := os.Getenv("SILA_CT_GOARCH"); arch != "" && arch != "amd64" {
+		t.Skip("the counter-comparison pattern is checked on amd64")
+	}
+	if runtime.GOARCH != "amd64" && os.Getenv("SILA_CT_GOARCH") == "" {
+		t.Skip("the counter-comparison pattern is checked on amd64")
+	}
+	counterCmp := regexp.MustCompile(`\sCMP[QL] [A-Z0-9]+, \$0x[0-9a-f]+\s*$`)
+	for _, pat := range []string{
+		`secp256k1\.divsteps62`,
+		`secp256k1\.modInverseCT`,
+		`secp256k1\.\(\*scalar\)\.inv`,
+	} {
+		funcs := objdump(t, bin, pat+`$`)
+		if len(funcs) == 0 {
+			t.Fatalf("no function matches %s", pat)
+		}
+		for name, body := range funcs {
+			hasStackCheck := morestack.MatchString(body)
+			prev, idx, n := "", 0, 0
+			for _, l := range strings.Split(body, "\n") {
+				if !instr.MatchString(l) {
+					continue
+				}
+				idx++
+				if condBranch.MatchString(l) {
+					n++
+					if hasStackCheck && idx <= 8 {
+						hasStackCheck = false
+					} else if !counterCmp.MatchString(prev) {
+						t.Errorf("%s: branch not on a counter:\n%s\n%s", name, prev, l)
+					}
+				}
+				prev = strings.TrimRight(l, " \t")
+			}
+			t.Logf("%s: %d conditional branch(es), all on counters or the stack check", name, n)
 		}
 	}
 }
@@ -144,9 +194,12 @@ func objdump(t *testing.T, bin, pattern string) map[string]string {
 }
 
 var (
-	// Conditional branches: amd64/386 Jcc (not JMP); arm64 B.cond,
-	// CBZ/CBNZ, TBZ/TBNZ; ppc64 B.cond and BC; riscv64 B.cond, BEQZ/BNEZ.
-	condBranch = regexp.MustCompile(`\s(J(?:EQ|NE|CS|CC|HI|LS|LT|GE|GT|LE|MI|PL|OS|OC|PS|PC|CXZL|CXZQ)|B(?:EQ|NE|CS|HS|CC|LO|MI|PL|VS|VC|HI|LS|GE|LT|GT|LE|LTU|GEU|EQZ|NEZ|C)|CBN?Z|TBN?Z)\s`)
+	// Conditional branches: amd64/386 Jcc (not JMP), in both the Go
+	// assembler names (JEQ, JCS, ...) and the Intel names that go tool
+	// objdump prints (JE, JA, JAE, JB, JBE, JG, JL, JS, JO, JP, JRCXZ,
+	// ...); arm64 B.cond, CBZ/CBNZ, TBZ/TBNZ; ppc64 B.cond and BC;
+	// riscv64 B.cond, BEQZ/BNEZ.
+	condBranch = regexp.MustCompile(`\s(J(?:EQ|NE|CS|CC|HI|LS|LT|GE|GT|LE|MI|PL|OS|OC|PS|PC|CXZL|CXZQ|E|Z|NZ|A|AE|B|BE|NA|NAE|NB|NBE|C|NC|G|L|NG|NGE|NL|NLE|S|NS|O|NO|P|NP|PE|PO|RCXZ|ECXZ|CXZ)|B(?:EQ|NE|CS|HS|CC|LO|MI|PL|VS|VC|HI|LS|GE|LT|GT|LE|LTU|GEU|EQZ|NEZ|C)|CBN?Z|TBN?Z)\s`)
 	morestack  = regexp.MustCompile(`runtime\.morestack`)
 	instr      = regexp.MustCompile(`^\s*\S+:\d+\s+0x[0-9a-f]+\s`)
 )

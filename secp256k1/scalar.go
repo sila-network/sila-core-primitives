@@ -173,12 +173,24 @@ func montReduceN(z *limbs, t0, t1, t2, t3, t4, t5, t6, t7 uint64) {
 	scalarN.reduceOnce(z, &r, carry)
 }
 
-// inv sets z = x^-1 mod n (x^(n-2)); the inverse of 0 is 0. The exponent
+// inv sets z = x^-1 mod n; the inverse of 0 is 0. Constant time: the
+// divstep inversion of inv_ct.go (fixed 744 divsteps) on the Montgomery
+// value a·R gives (a·R)^-1, and a Montgomery product with R^3 turns it
+// into a^-1·R.
+func (z *scalar) inv(x *scalar) *scalar {
+	y := modInverseCT(&x.v, &scalarN.m, scalarNInv62)
+	scalarMul(&z.v, &y, &scalarR3, &scalarN.m)
+	clear(y[:])
+	return z
+}
+
+// invFermat sets z = x^-1 mod n as x^(n-2) (the inverse of 0 is 0). It is
+// the reference the divstep inversion is tested against. The exponent
 // n - 2 is public: its top 127 bits are all ones (an addition chain builds
 // x^(2^127 - 1) with 126 squarings and 10 products), and the low 129 bits
 // are processed with a width-5 sliding window over odd powers. All
 // branches depend only on the bits of n - 2.
-func (z *scalar) inv(x *scalar) *scalar {
+func (z *scalar) invFermat(x *scalar) *scalar {
 	var x2, x3, x6, x7, x14, x28, x56, x112, x126, acc scalar
 	x2.square(x).mul(&x2, x)
 	x3.square(&x2).mul(&x3, x)

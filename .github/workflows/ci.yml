@@ -100,7 +100,7 @@ jobs:
         # s390x, ppc64le and riscv64 test binaries run directly. This does not
         # depend on the Ubuntu package mirrors, whose name resolution failed
         # on the runners (apt-get exit code 100, 2026-11-11).
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           platforms: s390x,ppc64le,riscv64
       - name: Check the emulators are registered

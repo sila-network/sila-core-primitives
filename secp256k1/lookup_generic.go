@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ahmed Ibrahim
 
-//go:build !amd64 || purego
+//go:build (!amd64 && !arm64) || purego
 
 package secp256k1
 

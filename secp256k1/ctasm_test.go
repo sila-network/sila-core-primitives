@@ -86,8 +86,11 @@ func TestCompiledLoopsAreCounterBound(t *testing.T) {
 	// no branch at all, by TestCompiledFieldAsmIsStraightLine); elsewhere
 	// it is the Go loop.
 	lookupAffine := `secp256k1\.\(\*affinePoint\)\.lookupAffine`
-	if arch == "amd64" {
+	switch arch {
+	case "amd64":
 		lookupAffine = `secp256k1\.lookupAffineSSE2\.abi0`
+	case "arm64":
+		lookupAffine = `secp256k1\.lookupAffineNEON\.abi0`
 	}
 	for _, pat := range []string{
 		`secp256k1\.\(\*point\)\.(lookup|scalarBaseMult|scalarMult)`,

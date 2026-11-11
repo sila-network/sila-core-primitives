@@ -228,6 +228,10 @@ var arm64Allowed = map[string]bool{
 	"MUL": true, "UMULH": true,
 	"ADDS": true, "ADCS": true, "ADC": true, "SUBS": true, "SBCS": true,
 	"CSEL": true, "RET": true,
+	// NEON for the table scan: loads/stores (post-increment by a constant),
+	// broadcast, lane comparison and logic.
+	"VLD1.P": true, "VST1": true, "VDUP": true, "VCMEQ": true,
+	"VAND": true, "VORR": true, "VEOR": true,
 }
 
 // TestArm64AsmSourceIsStraightLine reads field_arm64.s (on every platform)
@@ -287,7 +291,7 @@ func TestCompiledArm64AsmIsStraightLine(t *testing.T) {
 	}
 	bin := ctTestBinary(t)
 	branch := regexp.MustCompile(`\s(B|BL|BR|BLR|B\.[A-Z]+|CBN?Z|TBN?Z|RET)\s`)
-	for _, name := range []string{"fieldMul", "fieldSqr", "scalarMul", "scalarSqr"} {
+	for _, name := range []string{"fieldMul", "fieldSqr", "scalarMul", "scalarSqr", "lookupAffineNEON"} {
 		funcs := objdump(t, bin, `secp256k1\.`+name+`\.abi0$`)
 		if len(funcs) != 1 {
 			t.Fatalf("%s: assembly function not found", name)

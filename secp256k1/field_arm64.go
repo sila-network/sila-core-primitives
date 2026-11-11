@@ -21,3 +21,15 @@ func scalarMul(z, x, y, n *limbs)
 
 //go:noescape
 func scalarSqr(z, x, n *limbs)
+
+// lookupAffineNEON sets r = table[idx-1] for 1 <= idx <= 16, reading every
+// entry (field_arm64.s).
+//
+//go:noescape
+func lookupAffineNEON(r *affinePoint, table *[baseEntries]affinePoint, idx uint64)
+
+// lookupAffine sets r = table[mag-1], or table[0] for mag = 0, reading
+// every entry (constant time; mag <= 16).
+func (r *affinePoint) lookupAffine(table *[baseEntries]affinePoint, mag uint64) {
+	lookupAffineNEON(r, table, mag|((mag-1)>>63))
+}

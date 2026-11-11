@@ -30,7 +30,7 @@ func TestBlindedBaseMultMatchesPlain(t *testing.T) {
 		ks = append(ks, scalarFromBig(k))
 	}
 	seed := [32]byte{9}
-	fb, fnegB := derivedBlinding(&seed, 'B', true)
+	fb, fnegB := derivedBlinding(&seed, 'B', true, nil)
 	for i := range ks {
 		var want, got, got2 point
 		want.scalarBaseMult(&ks[i])
@@ -57,13 +57,13 @@ func TestBlindedInverseMatchesPlain(t *testing.T) {
 	for i, k := range interesting(rng, bigN, 300) {
 		sk := scalarFromBig(k)
 		seed[1] = byte(i)
-		rho, _ := derivedBlinding(&seed, 'I', false)
+		rho, _ := derivedBlinding(&seed, 'I', false, nil)
 		if rho.isZero() == 1 {
 			t.Fatal("zero blinding")
 		}
 		// Shares k = k1 + k2 with a derived mask, as in signing.
 		kc := sk.canonical()
-		m := derivedMaskLimbs(&seed, 'K')
+		m := derivedMaskLimbs(&seed, 'K', nil)
 		var k2c limbs
 		scalarN.sub(&k2c, &kc, &m)
 		var k1, k2 scalar
@@ -81,9 +81,9 @@ func TestBlindedInverseMatchesPlain(t *testing.T) {
 
 func TestDerivedBlinding(t *testing.T) {
 	seed := [32]byte{3}
-	a, pa := derivedBlinding(&seed, 'B', true)
-	b, _ := derivedBlinding(&seed, 'B', false)
-	c, _ := derivedBlinding(&seed, 'I', false)
+	a, pa := derivedBlinding(&seed, 'B', true, nil)
+	b, _ := derivedBlinding(&seed, 'B', false, nil)
+	c, _ := derivedBlinding(&seed, 'I', false, nil)
 	if a != b || a == c || a.isZero() == 1 {
 		t.Fatal("derived blinding must be deterministic, label-separated and non-zero")
 	}
@@ -283,3 +283,81 @@ func TestRefreshBlindingBounded(t *testing.T) {
 }
 
 func cryptoRandReader() io.Reader { return cryptorand.Reader }
+
+// countingReader returns a different byte pattern on every call and
+// counts the bytes it delivered.
+type countingReader struct{ calls, n int }
+
+func (c *countingReader) Read(b []byte) (int, error) {
+	c.calls++
+	for i := range b {
+		b[i] = byte(c.calls*131 + i)
+	}
+	c.n += len(b)
+	return len(b), nil
+}
+
+// TestSignFreshMasks covers findings S-12 and S-13: every signature draws
+// fresh random bytes that change the nonce shares, the inversion blinding
+// and the re-randomised key shares, while the signature stays the
+// deterministic RFC 6979 one; the stored key is not modified.
+func TestSignFreshMasks(t *testing.T) {
+	key, err := ParsePrivateKey(bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var digest [DigestSize]byte
+	digest[0] = 7
+	want, err := Sign(key, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d1, d2 := key.d1, key.d2
+	cr := &countingReader{}
+	withRandomSource(t, cr, func() {
+		for i := 0; i < 4; i++ {
+			before := cr.n
+			got, err := Sign(key, digest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatal("signature changed with the fresh randomness")
+			}
+			// 32 fresh bytes per signature (the process-wide blinding
+			// may draw once more on first use).
+			if cr.n-before < 32 {
+				t.Fatalf("signature %d drew %d random bytes", i, cr.n-before)
+			}
+		}
+	})
+	if key.d1 != d1 || key.d2 != d2 {
+		t.Fatal("Sign modified the stored key shares")
+	}
+	// Failing and all-zero sources: the masks fall back to K-derived
+	// values; the signature is unchanged.
+	for _, src := range []io.Reader{failingReader{}, zeroReader{}} {
+		withRandomSource(t, src, func() {
+			got, err := Sign(key, digest)
+			if err != nil || got != want {
+				t.Fatalf("signature changed with source %T", src)
+			}
+		})
+	}
+	// Different fresh bytes give different masks for the same K.
+	var k, f1, f2 [32]byte
+	k[0], f2[0] = 1, 1
+	for _, label := range []byte{'K', 'D'} {
+		a := derivedMaskLimbs(&k, label, &f1)
+		b := derivedMaskLimbs(&k, label, &f2)
+		c := derivedMaskLimbs(&k, label, nil)
+		if a == b || a == c {
+			t.Fatalf("mask %c does not depend on the fresh bytes", label)
+		}
+	}
+	r1, _ := derivedBlinding(&k, 'I', false, &f1)
+	r2, _ := derivedBlinding(&k, 'I', false, &f2)
+	if r1.equal(&r2) == 1 {
+		t.Fatal("rho does not depend on the fresh bytes")
+	}
+}

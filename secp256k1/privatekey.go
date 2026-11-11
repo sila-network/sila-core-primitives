@@ -145,7 +145,7 @@ func (k *PrivateKey) PublicKey() (PublicKey, error) {
 		p.scalarBaseMultShares(&k.d1, &k.d2, func() (scalar, point) {
 			seed := k.dBytes()
 			defer clear(seed[:])
-			return derivedBlinding(&seed, 'P', true)
+			return derivedBlinding(&seed, 'P', true, nil)
 		})
 		pub, err = publicKeyFromPoint(&p)
 	})

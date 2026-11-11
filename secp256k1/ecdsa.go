@@ -240,6 +240,18 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 	nonces := newRFC6979(&x, &z, extra)
 	clear(x[:])
 	defer nonces.wipe()
+
+	// Fresh randomness for this signature (findings S-12, S-13): it is
+	// mixed into every arithmetic mask below, so that repeated signatures
+	// with the same key — and even over the same digest, where RFC 6979
+	// repeats the nonce — never process the same masked operands. It does
+	// not influence the nonce or the signature. If the random source
+	// fails, the masks fall back to values derived from the RFC 6979 key
+	// alone (still secret, but repeated for a repeated key and digest).
+	var fresh [32]byte
+	readFresh(&fresh)
+	defer clear(fresh[:])
+
 	for {
 		kc, ok := nonces.next()
 		if !ok {
@@ -248,10 +260,11 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 		// The nonce never enters a multiplication unmasked: it is split
 		// into shares k = k1 + k2 in the canonical domain (a modular
 		// subtraction), with k1 derived from the secret RFC 6979 key K
-		// (domain-separated HMAC; the candidate sequence is unchanged).
-		// Only the pseudo-random shares are converted to Montgomery form.
+		// and the fresh bytes (domain-separated HMAC; the candidate
+		// sequence is unchanged). Only the shares are converted to
+		// Montgomery form.
 		var k1, k2 scalar
-		m := derivedMaskLimbs(&nonces.k, 'K')
+		m := derivedMaskLimbs(&nonces.k, 'K', &fresh)
 		var kc2 limbs
 		scalarN.sub(&kc2, &kc, &m)
 		scalarN.toMont(&k1.v, &m)
@@ -259,14 +272,26 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 		clear(kc[:])
 		clear(kc2[:])
 		clear(m[:])
-		// Per-signature inversion blinding rho (another derived value).
-		rho, _ := derivedBlinding(&nonces.k, 'I', false)
-		sig, ok := signWithNonce(&priv.d1, &priv.d2, &z, &k1, &k2, &rho, func() (scalar, point) {
-			return derivedBlinding(&nonces.k, 'B', true)
+		// Per-signature inversion blinding rho.
+		rho, _ := derivedBlinding(&nonces.k, 'I', false, &fresh)
+		// Per-signature re-randomisation of the key shares (local copies;
+		// the stored key is not modified): d = (d1 + t) + (d2 - t). Only
+		// additions touch the stored shares.
+		var t, d1, d2 scalar
+		tl := derivedMaskLimbs(&nonces.k, 'D', &fresh)
+		scalarN.toMont(&t.v, &tl)
+		clear(tl[:])
+		d1.add(&priv.d1, &t)
+		d2.sub(&priv.d2, &t)
+		t.zero()
+		sig, ok := signWithNonce(&d1, &d2, &z, &k1, &k2, &rho, func() (scalar, point) {
+			return derivedBlinding(&nonces.k, 'B', true, &fresh)
 		})
 		rho.zero()
 		k1.zero()
 		k2.zero()
+		d1.zero()
+		d2.zero()
 		if ok {
 			return sig
 		}
@@ -503,4 +528,25 @@ func hmacSHA256(key *[32]byte, parts ...[]byte) [32]byte {
 	copy(outer[block:], inner[:])
 	clear(inner[:])
 	return sha256.Sum256(outer[:])
+}
+
+// readFresh fills b from the package random source, or with zeros if the
+// source fails. With the default source it calls crypto/rand.Read
+// directly, which keeps b on the stack (an io.Reader interface call would
+// move it to the heap); tests replace the source to exercise failures.
+func readFresh(b *[32]byte) {
+	var err error
+	if randomSource == cryptorand.Reader {
+		_, err = cryptorand.Read(b[:])
+	} else {
+		// Replaced source (tests): read through a separate buffer so that
+		// b itself never reaches an interface call.
+		buf := make([]byte, len(b))
+		_, err = io.ReadFull(randomSource, buf)
+		copy(b[:], buf)
+		clear(buf)
+	}
+	if err != nil {
+		clear(b[:])
+	}
 }

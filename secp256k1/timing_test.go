@@ -164,13 +164,24 @@ func TestConstantTimeStatistical(t *testing.T) {
 	idx := 0
 	// load copies the secret into the fixed inputs (untimed); run is timed.
 	var in1, in2 scalar // shares of in (k = in1 + in2), as in signing
-	loadScalar := func(k *scalar) {
+	// Keys are parsed once per secret set (setShares, as ParsePrivateKey)
+	// and then reused for every sample of that secret, as a long-lived key
+	// is in production: the timed Sign re-randomises its shares itself.
+	loadScalar := func(k *scalar, kp *PrivateKey) {
 		in = *k
 		in1 = rhos[(idx+128)&255]
 		in2.sub(k, &in1)
-		c := k.canonical()
-		key.setShares(&c) // fresh random shares, as ParsePrivateKey does
+		key = kp
 		idx++
+	}
+	mkKeys := func(x []scalar) []PrivateKey {
+		ks := make([]PrivateKey, len(x))
+		for i := range x {
+			c := x[i].canonical()
+			ks[i].valid = true
+			ks[i].setShares(&c)
+		}
+		return ks
 	}
 	ops := []struct {
 		name       string
@@ -215,12 +226,15 @@ func TestConstantTimeStatistical(t *testing.T) {
 				b[i] = scalarFromBig(new(big.Int).Mod(new(big.Int).SetBytes(randBytes(rng)), bigN))
 				c[i] = scalarFromBig(new(big.Int).Mod(new(big.Int).SetBytes(randBytes(rng)), bigN))
 			}
+			ka, kb, kc := mkKeys(a), mkKeys(b), mkKeys(c)
+			keysOf := map[*scalar][]PrivateKey{&a[0]: ka, &b[0]: kb, &c[0]: kc}
 			pair := func(x, y []scalar) func(class, i int) {
+				kx, ky := keysOf[&x[0]], keysOf[&y[0]]
 				return func(class, i int) {
 					if class == 0 {
-						loadScalar(&x[i%256])
+						loadScalar(&x[i%256], &kx[i%256])
 					} else {
-						loadScalar(&y[i%256])
+						loadScalar(&y[i%256], &ky[i%256])
 					}
 				}
 			}

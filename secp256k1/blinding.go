@@ -178,9 +178,17 @@ func (z *scalar) invMaskedShares(k1, k2, rho *scalar) *scalar {
 // derivedMaskLimbs returns a secret mask in [0, n), canonical limbs,
 // derived from a 32-byte secret seed with a domain-separated HMAC-SHA-256
 // (no multiplication).
-func derivedMaskLimbs(seed *[32]byte, label byte) limbs {
+//
+// fresh, when not nil, is mixed into the HMAC message: the per-signature
+// random bytes that make the masks of repeated signatures over the same
+// key and digest independent (findings S-12, S-13).
+func derivedMaskLimbs(seed *[32]byte, label byte, fresh *[32]byte) limbs {
 	in := [1]byte{label}
-	h := hmacSHA256(seed, []byte("SILA-secp256k1-mask"), in[:])
+	var fr []byte
+	if fresh != nil {
+		fr = fresh[:]
+	}
+	h := hmacSHA256(seed, []byte("SILA-secp256k1-mask"), in[:], fr)
 	m := limbsFromBytes(&h)
 	scalarN.reduceOnce(&m, &m, 0) // any 256-bit value is < 2n
 	clear(h[:])
@@ -191,11 +199,18 @@ func derivedMaskLimbs(seed *[32]byte, label byte) limbs {
 // −scalar·G, derived from a 32-byte secret seed with a domain-separated
 // HMAC-SHA-256. It is the fallback when crypto/rand is unavailable and the
 // source of the per-signature inversion blinding.
-func derivedBlinding(seed *[32]byte, label byte, withPoint bool) (scalar, point) {
+//
+// fresh, when not nil, is mixed into the HMAC message (see
+// derivedMaskLimbs).
+func derivedBlinding(seed *[32]byte, label byte, withPoint bool, fresh *[32]byte) (scalar, point) {
 	var s scalar
 	var negP point
 	in := [1]byte{label}
-	h := hmacSHA256(seed, []byte("SILA-secp256k1-blinding"), in[:])
+	var fr []byte
+	if fresh != nil {
+		fr = fresh[:]
+	}
+	h := hmacSHA256(seed, []byte("SILA-secp256k1-blinding"), in[:], fr)
 	for ctr := byte(0); ; ctr++ {
 		if s.setBytesCanonical(&h)&(1^s.isZero()) == 1 {
 			break

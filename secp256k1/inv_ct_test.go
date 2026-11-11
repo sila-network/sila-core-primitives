@@ -83,41 +83,53 @@ func TestScalarInvMatchesFermat(t *testing.T) {
 	}
 }
 
-// TestDivstepsBound runs the divstep recurrence on full-size integers
-// (math/big) for many inputs and checks that g reaches 0 within the 744
-// steps the constant-time inversion runs (the proven bound is 741).
+// TestDivstepsBound runs the half-delta divstep recurrence of inv_ct.go
+// on full-size integers (math/big) and checks that g reaches 0 within 590
+// steps (the bound the constant-time inversion relies on; it runs 620):
+// random inputs for both moduli, and structured ones (small values, powers
+// of two, runs of ones, values next to m, m/2, m/3).
 func TestDivstepsBound(t *testing.T) {
 	rng := mrand.New(mrand.NewSource(76))
-	M := limbsToBig(scalarN.m)
-	P := limbsToBig(fieldP.m)
 	max := 0
-	for i := 0; i < 3000; i++ {
-		m := M
-		if i%2 == 1 {
-			m = P
+	for _, m := range []*big.Int{limbsToBig(scalarN.m), limbsToBig(fieldP.m)} {
+		var vals []*big.Int
+		for i := int64(1); i < 64; i++ {
+			vals = append(vals, big.NewInt(i), new(big.Int).Sub(m, big.NewInt(i)))
 		}
-		g := new(big.Int).Rand(rng, m)
-		f := new(big.Int).Set(m)
-		delta := 1
-		steps := 0
-		for g.Sign() != 0 {
-			if delta > 0 && g.Bit(0) == 1 {
-				delta, f, g = 1-delta, g, new(big.Int).Rsh(new(big.Int).Sub(g, f), 1)
-			} else if g.Bit(0) == 1 {
-				delta, g = 1+delta, new(big.Int).Rsh(new(big.Int).Add(g, f), 1)
-			} else {
-				delta, g = 1+delta, new(big.Int).Rsh(g, 1)
+		for i := 0; i < 256; i++ {
+			one := big.NewInt(1)
+			p2 := new(big.Int).Lsh(one, uint(i))
+			run := new(big.Int).Sub(p2, one)
+			vals = append(vals, p2, run, new(big.Int).Lsh(run, uint(255-i)))
+		}
+		vals = append(vals, new(big.Int).Rsh(m, 1), new(big.Int).Div(m, big.NewInt(3)))
+		for i := 0; i < 20000; i++ {
+			vals = append(vals, new(big.Int).Rand(rng, m))
+		}
+		for _, v := range vals {
+			g := new(big.Int).Mod(v, m)
+			f := new(big.Int).Set(m)
+			zeta := 0
+			steps := 0
+			for g.Sign() != 0 {
+				if zeta >= 0 && g.Bit(0) == 1 {
+					zeta, f, g = -zeta, g, new(big.Int).Rsh(new(big.Int).Sub(g, f), 1)
+				} else if g.Bit(0) == 1 {
+					zeta, g = zeta+1, new(big.Int).Rsh(new(big.Int).Add(g, f), 1)
+				} else {
+					zeta, g = zeta+1, new(big.Int).Rsh(g, 1)
+				}
+				steps++
 			}
-			steps++
-		}
-		if steps > max {
-			max = steps
+			if steps > max {
+				max = steps
+			}
 		}
 	}
-	if max > 741 {
-		t.Fatalf("divsteps needed %d > 741", max)
+	if max > 590 {
+		t.Fatalf("divsteps needed %d > 590", max)
 	}
-	t.Logf("maximum divsteps over the sample: %d (bound 741, run 744)", max)
+	t.Logf("maximum divsteps over the sample: %d (bound 590, run 620)", max)
 }
 
 // TestFieldInvMatchesFermat checks the field wrapper against the Fermat

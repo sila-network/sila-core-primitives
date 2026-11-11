@@ -68,10 +68,18 @@ Constant-time techniques:
   line, no data-dependent address; the only branch is the CPU dispatch on
   the start-up constant `useADX`. Other architectures and `-tags purego`
   use the Go code.
-- Scalar inversion (the blinded k·ρ): constant-time divstep algorithm
-  (Bernstein–Yang), always 744 divsteps (≥ 741, the bound of their
-  Theorem 11.2 for 256-bit inputs), mask-only steps. The field inversion
-  stays Fermat (no measured gain).
+- Scalar and field inversions (the blinded k·ρ, the Z of k·G, the
+  affine conversion of PublicKey): constant-time divstep algorithm
+  (Bernstein–Yang) in its half-delta form, always 10 × 62 = 620 divsteps,
+  mask-only steps. The bound relied on is 590 divsteps for 256-bit
+  inputs, the convex-hull bound computed for this variant
+  (safegcd-bounds analysis; libsecp256k1's modinv64 runs exactly 590
+  constant-time divsteps on it); `TestDivstepsBound` checks it on random
+  and structured inputs (observed maximum 532). Earlier revisions ran the
+  original delta = 1 form for 744 divsteps (bound 741, Theorem 11.2 of
+  the paper). If the 590 bound were wrong for some input, the effect
+  would be a wrong inverse, not a timing difference; every inverse used
+  by Sign is covered by the RFC 6979 / Wycheproof / differential vectors.
 - The variable-time code (Jacobian formulas with explicit special cases,
   GLV split, wNAF, the variable-time divstep inversion, effective-affine
   tables, the halved doubling) is confined to the `vartime*.go` files and

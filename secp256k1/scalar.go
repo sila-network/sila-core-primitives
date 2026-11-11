@@ -174,7 +174,7 @@ func montReduceN(z *limbs, t0, t1, t2, t3, t4, t5, t6, t7 uint64) {
 }
 
 // inv sets z = x^-1 mod n; the inverse of 0 is 0. Constant time: the
-// divstep inversion of inv_ct.go (fixed 744 divsteps) on the Montgomery
+// divstep inversion of inv_ct.go (fixed 620 divsteps) on the Montgomery
 // value a·R gives (a·R)^-1, and a Montgomery product with R^3 turns it
 // into a^-1·R.
 func (z *scalar) inv(x *scalar) *scalar {

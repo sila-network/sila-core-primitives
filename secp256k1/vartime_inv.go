@@ -7,7 +7,7 @@ package secp256k1
 // components, recovered points, public-key tables). Like everything in the
 // vartime*.go files, it branches on its input; the static test
 // TestVariableTimeHelpersOnlyOnPublicPaths keeps it off the secret paths,
-// which use the constant-time Fermat inversions in field.go and scalar.go.
+// which use the constant-time divstep inversion of inv_ct.go.
 //
 // Algorithm: the "divstep" GCD of Bernstein and Yang ("Fast constant-time
 // gcd computation and modular inversion", 2019), run in variable time:

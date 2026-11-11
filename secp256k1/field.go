@@ -201,7 +201,7 @@ func (z *fieldElement) mulSmall(x *fieldElement, k uint64) *fieldElement {
 }
 
 // inv sets z = x^-1 mod p; the inverse of 0 is 0. Constant time: the
-// divstep inversion of inv_ct.go (fixed 744 divsteps), which measured
+// divstep inversion of inv_ct.go (fixed 620 divsteps), which measured
 // faster than the Fermat chain on arm64 (3.8 vs 4.3 us) and equal on
 // amd64.
 func (z *fieldElement) inv(x *fieldElement) *fieldElement {

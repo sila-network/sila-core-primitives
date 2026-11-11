@@ -148,7 +148,7 @@ func TestCompiledInversionLoopsAreCounters(t *testing.T) {
 	}
 	for pat, want := range map[string][]uint64{
 		`secp256k1\.divsteps62`:        {62},
-		`secp256k1\.modInverseCT`:      {12, 5},
+		`secp256k1\.modInverseCT`:      {10, 5},
 		`secp256k1\.\(\*scalar\)\.inv`: nil,
 	} {
 		funcs := objdump(t, bin, pat+`$`)

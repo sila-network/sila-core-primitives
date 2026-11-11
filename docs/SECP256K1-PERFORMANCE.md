@@ -15,7 +15,7 @@ checked by the full test suite; see the commit messages):
 |---|---|---|
 | Field multiplication/squaring in amd64 assembly: MULX/ADCX/ADOX when CPUID reports BMI2+ADX, MULQ otherwise; scalar Montgomery multiplication likewise | all, amd64 only | yes (straight line; checked, §3 of the security review) |
 | SSE2 scan of the fixed-base table (all 16 entries, masks) | Sign, PublicKey, amd64 only | yes |
-| Constant-time divstep scalar inversion (744 fixed divsteps) | Sign | yes |
+| Constant-time divstep scalar and field inversion (620 fixed half-delta divsteps; 744 before) | Sign, PublicKey | yes |
 | Variable-time divstep inversion; effective-affine co-Z table for the public point; halved doubling; width-12 G tables (128 KiB, built on the first verification, about 0.4 ms) | Verify, Recover only | no — public inputs only |
 | Per-signature fresh masks and key-share re-randomisation (security fix S-12/S-13) | Sign | yes; costs about +7 % on Sign |
 

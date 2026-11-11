@@ -9,17 +9,22 @@ package secp256k1
 // blinded nonce product k·ρ (invMaskedShares) and the affine conversion
 // of PublicKey.
 //
-// The divstep (original form, delta starting at 1) is
+// The divstep used is the "half-delta" variant (delta starts at 1/2;
+// zeta = delta - 1/2 starts at 0):
 //
-//	delta > 0 and g odd: (1 - delta, g, (g - f)/2)
-//	g odd:               (1 + delta, f, (g + f)/2)
-//	g even:              (1 + delta, f, g/2)
+//	zeta >= 0 and g odd: (-zeta,    g, (g - f)/2)
+//	g odd:               (zeta + 1, f, (g + f)/2)
+//	g even:              (zeta + 1, f, g/2)
 //
-// For f odd and 0 <= g < f < 2^256, Theorem 11.2 of the paper bounds the
-// number of divsteps after which g = 0 by floor((49·256 + 57)/17) = 741.
-// The inversion always runs 12 batches of 62 divsteps (744 >= 741): the
+// For f odd and 0 <= g < f < 2^256, at most 590 divsteps of this variant
+// are needed before g = 0 (the published convex-hull bound for this
+// variant, see docs/SECP256K1-SECURITY-REVIEW.md; the original
+// delta = 1 recurrence has the bound
+// floor((49·256 + 57)/17) = 741 of Bernstein–Yang's Theorem 11.2). The
+// inversion always runs 10 batches of 62 divsteps (620 >= 590): the
 // number of operations does not depend on the input, and once g = 0 the
-// further divsteps leave f (= ±1) and d unchanged.
+// further divsteps leave f (= ±1) and d unchanged. TestDivstepsBound
+// checks the bound on random and structured inputs.
 //
 // Constant time: every divstep is computed with masks (no branch, no
 // data-dependent index); the 320-bit updates (wide.go, linComb,
@@ -30,23 +35,24 @@ package secp256k1
 import "math/bits"
 
 // divsteps62 runs 62 divsteps on the low words of (f, g), f odd, in
-// constant time, and returns the new delta and the transition matrix
+// constant time, and returns the new zeta and the transition matrix
 // (u, v; q, r) with 2^62·f' = u·f + v·g and 2^62·g' = q·f + r·g. With
-// c1 = (delta > 0) and c2 = (g odd) as masks, one divstep is
+// c1 = (zeta >= 0) and c2 = (g odd) as masks, one divstep is
 //
 //	g += (c1 ? -f : f) if c2;  (q, r) += (c1 ? -(u, v) : (u, v)) if c2
 //	if c1 and c2 (swap): f += g (the new g is g - f, so f becomes the old
-//	  g), (u, v) += (q, r) (likewise), delta = -delta
-//	g /= 2, (u, v) *= 2, delta += 1
+//	  g), (u, v) += (q, r) (likewise)
+//	zeta = swap ? -zeta : zeta + 1, computed as (zeta ^ swap) + 1
+//	g /= 2, (u, v) *= 2
 //
-// which gives (1 - delta, g, (g - f)/2) when swapping, (1 + delta, f,
-// (g + f)/2) for g odd otherwise and (1 + delta, f, g/2) for g even.
+// which gives (-zeta, g, (g - f)/2) when swapping, (zeta + 1, f,
+// (g + f)/2) for g odd otherwise and (zeta + 1, f, g/2) for g even.
 // Only the low 64 - j bits are exact after j steps, enough for every
 // parity decision; the row sums |u| + |v| and |q| + |r| stay <= 2^62.
-func divsteps62(delta int64, f, g uint64) (int64, int64, int64, int64, int64) {
+func divsteps62(zeta int64, f, g uint64) (int64, int64, int64, int64, int64) {
 	u, v, q, r := int64(1), int64(0), int64(0), int64(1)
 	for i := 0; i < 62; i++ {
-		c1 := (-delta) >> 63      // all ones iff delta > 0
+		c1 := ^(zeta >> 63)       // all ones iff zeta >= 0
 		c2 := -int64(g & 1)       // all ones iff g is odd
 		x := (int64(f) ^ c1) - c1 // ±f
 		y := (u ^ c1) - c1
@@ -55,7 +61,7 @@ func divsteps62(delta int64, f, g uint64) (int64, int64, int64, int64, int64) {
 		q += y & c2
 		r += z & c2
 		c1 &= c2 // swap
-		delta = (delta ^ c1) - c1 + 1
+		zeta = (zeta ^ c1) + 1
 		f += g & uint64(c1)
 		u += q & c1
 		v += r & c1
@@ -63,7 +69,7 @@ func divsteps62(delta int64, f, g uint64) (int64, int64, int64, int64, int64) {
 		u <<= 1
 		v <<= 1
 	}
-	return delta, u, v, q, r
+	return zeta, u, v, q, r
 }
 
 // linShr62 returns (u·a + v·b) / 2^62 (arithmetic shift) for signed u, v
@@ -152,10 +158,10 @@ func modInverseCT(x, m *limbs, mInv62 uint64) limbs {
 	f, g := M, wideFromLimbs(x)
 	var d, e wide // f ≡ d·x, g ≡ e·x (mod m); -m < d, e < m
 	e[0] = 1
-	delta := int64(1)
-	for i := 0; i < 12; i++ {
+	zeta := int64(0) // delta = 1/2
+	for i := 0; i < 10; i++ {
 		var u, v, q, r int64
-		delta, u, v, q, r = divsteps62(delta, f[0], g[0])
+		zeta, u, v, q, r = divsteps62(zeta, f[0], g[0])
 		// (f, g) <- T·(f, g) / 2^62; |f|, |g| <= m keeps the
 		// combinations below 2^318 in absolute value.
 		f, g = linShr62(&f, &g, u, v), linShr62(&f, &g, q, r)

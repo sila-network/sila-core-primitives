@@ -185,15 +185,14 @@ TEXT ·fieldSqr(SB), NOSPLIT, $0-16
 	ADC ZR, ZR, R17
 	ADDS R21, R16, R16
 	ADC R22, R17, R17
-	// Double the cross products with shifts (independent, no carry
-	// chain): t_i = t_i<<1 | t_(i-1)>>63, t7 = t6>>63.
-	LSR $63, R17, R19
-	EXTR $63, R16, R17, R17
-	EXTR $63, R15, R16, R16
-	EXTR $63, R14, R15, R15
-	EXTR $63, R13, R14, R14
-	EXTR $63, R12, R13, R13
-	LSL $1, R12, R12
+	// Double the cross products (t7 receives the top bit).
+	ADDS R12, R12, R12
+	ADCS R13, R13, R13
+	ADCS R14, R14, R14
+	ADCS R15, R15, R15
+	ADCS R16, R16, R16
+	ADCS R17, R17, R17
+	ADC ZR, ZR, R19
 	// Add the squares x_i^2 at words 2i, 2i+1.
 	MUL R3, R3, R11
 	UMULH R3, R3, R7
@@ -484,15 +483,14 @@ TEXT ·scalarSqr(SB), NOSPLIT, $0-24
 	ADC ZR, ZR, R17
 	ADDS R21, R16, R16
 	ADC R22, R17, R17
-	// Double the cross products with shifts (independent, no carry
-	// chain): t_i = t_i<<1 | t_(i-1)>>63, t7 = t6>>63.
-	LSR $63, R17, R19
-	EXTR $63, R16, R17, R17
-	EXTR $63, R15, R16, R16
-	EXTR $63, R14, R15, R15
-	EXTR $63, R13, R14, R14
-	EXTR $63, R12, R13, R13
-	LSL $1, R12, R12
+	// Double the cross products (t7 receives the top bit).
+	ADDS R12, R12, R12
+	ADCS R13, R13, R13
+	ADCS R14, R14, R14
+	ADCS R15, R15, R15
+	ADCS R16, R16, R16
+	ADCS R17, R17, R17
+	ADC ZR, ZR, R19
 	// Add the squares x_i^2 at words 2i, 2i+1.
 	MUL R3, R3, R11
 	UMULH R3, R3, R7

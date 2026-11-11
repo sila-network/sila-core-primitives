@@ -453,7 +453,33 @@ func TestFaultChecks(t *testing.T) {
 		}()
 		checkSamePoint(&g2, &generator)
 	}()
-	// Sign must actually run both checks (a removed call fails here).
+	// The coordinate-to-r path: r (plus n on overflow) must match the x
+	// coordinate of the second computation, in any representation.
+	expectFault := func(name string, f func()) {
+		t.Helper()
+		defer func() {
+			if r := recover(); r != errFaultDetected {
+				t.Fatalf("%s: fault not detected (recover = %v)", name, r)
+			}
+		}()
+		f()
+	}
+	gxb := gx.bytes()
+	var rG, rBad scalar
+	rG.setBytesReduced(&gxb)
+	gxb[31] ^= 1 // a flipped bit between the point and r
+	rBad.setBytesReduced(&gxb)
+	gScaled := point{x: *new(fieldElement).mul(&generator.x, &lam), y: generator.y, z: *new(fieldElement).mul(&generator.z, &lam)}
+	checkRMatchesPoint(&rG, 0, &gScaled) // correct: no panic
+	expectFault("flipped r bit", func() { checkRMatchesPoint(&rBad, 0, &gScaled) })
+	expectFault("wrong overflow bit", func() { checkRMatchesPoint(&rG, 1, &gScaled) })
+	// Overflow case (x = r + n < p), with a synthetic projective x.
+	rSmall := scalarFromBig(big.NewInt(5))
+	xl, _ := addLimbs(&limbs{5}, &scalarN.m)
+	xOver := point{x: *new(fieldElement).mul(&fieldElement{v: xl}, &lam), z: lam}
+	checkRMatchesPoint(&rSmall, 1, &xOver) // correct: no panic
+	expectFault("missing overflow", func() { checkRMatchesPoint(&rSmall, 0, &xOver) })
+	// Sign must actually run all checks (a removed call fails here).
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "ecdsa.go", nil, 0)
 	if err != nil {
@@ -472,7 +498,7 @@ func TestFaultChecks(t *testing.T) {
 			})
 		}
 	}
-	for _, name := range []string{"checkSigningPoint", "checkSamePoint"} {
+	for _, name := range []string{"checkSigningPoint", "checkSamePoint", "checkRMatchesPoint"} {
 		if !called[name] {
 			t.Fatalf("signWithNonce does not call %s", name)
 		}

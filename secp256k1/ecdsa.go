@@ -339,6 +339,9 @@ func signWithNonce(d1, d2, z, k1, k2 *scalar, c1, c2 *limbs, lambda, lambda2 *fi
 	if r.isZero() == 1 {
 		return Signature{}, false
 	}
+	// Fault check of the coordinate-to-r path: r (plus n when x >= n)
+	// must be the x coordinate of the second, independent computation R2.
+	checkRMatchesPoint(&r, overflow, &R2)
 
 	// s = k^-1 (z + r·d) = (k·rho)^-1 · (rho·z + (r·d1)·rho + (r·d2)·rho).
 	// The numerator stays in shares until it has been multiplied by rho:
@@ -555,6 +558,23 @@ func hmacSHA256(key *[32]byte, parts ...[]byte) [32]byte {
 
 // errFaultDetected is the panic value of the signing fault checks.
 var errFaultDetected = errors.New("sila/secp256k1: fault detected in k·G; no signature produced")
+
+// checkRMatchesPoint panics unless r + overflow·n is the affine x
+// coordinate of p, checked projectively as (r + overflow·n)·Z == X
+// (one multiplication). Sign checks r against its second, independent
+// computation of k·G, so a fault between the point and r is detected.
+func checkRMatchesPoint(r *scalar, overflow uint64, p *point) {
+	rc := r.canonical() // r is public (part of the signature)
+	m := -overflow
+	nm := limbs{scalarN.m[0] & m, scalarN.m[1] & m, scalarN.m[2] & m, scalarN.m[3] & m}
+	x, _ := addLimbs(&rc, &nm)
+	var f, lhs fieldElement
+	f.v = x
+	lhs.mul(&f, &p.z)
+	if lhs.equal(&p.x) != 1 {
+		panic(errFaultDetected)
+	}
+}
 
 // checkSamePoint panics unless p and q are the same point (projective
 // comparison, constant time). Sign compares two independently randomised

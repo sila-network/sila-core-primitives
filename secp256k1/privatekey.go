@@ -28,6 +28,11 @@ const PrivateKeySize = 32
 // processor cannot depend on d.
 type PrivateKey struct {
 	d1, d2 scalar // Montgomery form; d = d1 + d2 mod n
+	// c1, c2 are the same shares in canonical form (c1 + c2 = d mod n),
+	// kept so that d can be rebuilt for RFC 6979 and Bytes with a modular
+	// addition only: converting d1, d2 out of Montgomery form would
+	// multiply the fixed stored shares on every signature (finding S-14).
+	c1, c2 limbs
 	valid  bool
 }
 
@@ -75,21 +80,19 @@ func (k *PrivateKey) setShares(d *limbs) {
 	clear(rnd[:])
 	var r limbs
 	scalarN.sub(&r, d, &m) // d2 = d - d1 mod n
+	k.c1, k.c2 = m, r
 	scalarN.toMont(&k.d1.v, &m)
 	scalarN.toMont(&k.d2.v, &r)
 	clear(m[:])
 	clear(r[:])
 }
 
-// canonicalD returns d = d1 + d2 mod n in canonical limbs: each share is
-// converted out of Montgomery form (multiplying random values), and the
-// shares are added (an addition, not a multiplication, produces d).
+// canonicalD returns d = c1 + c2 mod n in canonical limbs: a modular
+// addition of the canonical shares, with no multiplication (no stored
+// share is ever a multiplication operand here; S-14).
 func (k *PrivateKey) canonicalD() limbs {
-	a, b := k.d1.canonical(), k.d2.canonical()
 	var d limbs
-	scalarN.add(&d, &a, &b)
-	clear(a[:])
-	clear(b[:])
+	scalarN.add(&d, &k.c1, &k.c2)
 	return d
 }
 
@@ -159,5 +162,7 @@ func (k *PrivateKey) Zero() {
 	}
 	k.d1.zero()
 	k.d2.zero()
+	clear(k.c1[:])
+	clear(k.c2[:])
 	k.valid = false
 }

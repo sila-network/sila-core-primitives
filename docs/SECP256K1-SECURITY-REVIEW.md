@@ -114,6 +114,7 @@ Enforced by tests:
 | S-4 | An unchecked assumption about digests ≥ n | Measured; documented in the contract | `TestSecp256k1DigestAboveOrder` |
 | S-5 | High-S handling was one rule for all contexts; raw recovery must accept high-S, transactions must not | Strict and recovery-compatible parsers; `txsig` rules; `Verify` stays strict | `TestHighSContexts`, `TestParityRawRecovery`, `TestParityValidateSignatureValues` |
 | S-6 | Branch-free source does not guarantee branch-free machine code | Compiled-code check in CI on five architectures | `TestCompiledConstantTimeFunctions` |
+| S-14 | Review finding (Codex P1, on 8aec3bc): before the per-signature re-randomisation, Sign rebuilt d for RFC 6979 with `dBytes → canonicalD → fromMont`, multiplying both fixed stored shares on every signature (also in `Bytes`) | The key also keeps its shares in canonical form (c1 + c2 = d); d is rebuilt by a modular addition only, so no stored share is a multiplication operand on that path | `TestKeyReconstructionHasNoMultiplication` (AST check + share consistency; a reintroduced `canonical()` call fails it) |
 | S-13 | Review finding (Codex P1, on 8973b50): the nonce share mask, ρ and the fallback blinding were derived from the RFC 6979 key K alone, so they repeated exactly for a repeated key and digest | 32 fresh random bytes per signature mixed into these derivations (no allocation with Go ≥ 1.24; one allocation per signature on Go 1.23, whose crypto/rand.Read takes the buffer through an interface); signature unchanged; fallback to K-derived masks if the source fails (documented) | `TestSignFreshMasks` |
 | S-12 | Review finding (Codex P1, on 8973b50): the stored key shares were fixed for the key's lifetime, so r·d1 and r·d2 took the same shares in every signature; the timing harness re-masked the key before every sample, hiding this pattern | Per-signature local re-randomisation d = (d1 + t) + (d2 − t), stored key unchanged; the harness now reuses each parsed key for all its samples | `TestSignFreshMasks`, `TestConstantTimeStatistical` |
 | S-11 | The compiled-code branch detector recognised on amd64 only JNE/JGE/JLE: go tool objdump prints Intel names (JE, JA, JB, JL, JG, JS, ...) that the pattern missed | Pattern extended to both naming styles (a50cbda); the re-run found no conditional branch in any listed constant-time function | `TestCompiledConstantTimeFunctions` |
@@ -313,6 +314,10 @@ random-vs-random controls stay below 4.5 in at least 9 of 10 runs.
    new (2026-11-11) and covered only by the automated checks above; it is
    part of the independent audit (§6.3). The x86 timing guarantee for
    MULX/ADCX/ADOX/MULQ holds under DOIT (not available here).
-9. **Randomness failure:** if the random source fails, Sign keeps working
+9. **PublicKey repeats a masked operand:** `PrivateKey.PublicKey` converts
+   (d + b)·R out of Montgomery form, where b is the process-wide blinding;
+   repeated calls with the same key use the same masked value until
+   `RefreshBlinding` (no fixed share is used, unlike S-14).
+10. **Randomness failure:** if the random source fails, Sign keeps working
    with K-derived masks (S-13), which repeat for a repeated key and digest;
    the process-wide blinding is retried on the next call (S-9).

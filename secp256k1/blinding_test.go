@@ -7,6 +7,9 @@ import (
 	"bytes"
 	cryptorand "crypto/rand"
 	"crypto/sha256"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"math/big"
 	"math/rand"
@@ -359,5 +362,80 @@ func TestSignFreshMasks(t *testing.T) {
 	r2, _ := derivedBlinding(&k, 'I', false, &f2)
 	if r1.equal(&r2) == 1 {
 		t.Fatal("rho does not depend on the fresh bytes")
+	}
+}
+
+// TestKeyReconstructionHasNoMultiplication covers finding S-14: rebuilding
+// d for RFC 6979 and Bytes must not multiply the fixed stored shares. The
+// reconstruction path (canonicalD, dBytes, Bytes) may call no
+// multiplication, squaring, inversion or Montgomery conversion, and the
+// canonical and Montgomery shares must describe the same d.
+func TestKeyReconstructionHasNoMultiplication(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "privatekey.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := map[string]bool{
+		"mul": true, "square": true, "sqrN": true, "inv": true, "invFermat": true,
+		"toMont": true, "fromMont": true, "canonical": true, "scalarMul": true,
+		"scalarSqr": true, "mulWords": true, "montReduceN": true,
+	}
+	checked := 0
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		switch fn.Name.Name {
+		case "canonicalD", "dBytes", "Bytes":
+		default:
+			continue
+		}
+		checked++
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			var name string
+			switch c := call.Fun.(type) {
+			case *ast.Ident:
+				name = c.Name
+			case *ast.SelectorExpr:
+				name = c.Sel.Name
+			}
+			if forbidden[name] {
+				t.Errorf("%s: %s calls %s on the key reconstruction path", fset.Position(call.Pos()), fn.Name.Name, name)
+			}
+			return true
+		})
+	}
+	if checked != 3 {
+		t.Fatalf("checked %d of 3 reconstruction functions", checked)
+	}
+	// The canonical shares and the Montgomery shares agree with d.
+	for i := 0; i < 200; i++ {
+		var b [32]byte
+		if _, err := cryptorand.Read(b[:]); err != nil {
+			t.Fatal(err)
+		}
+		k, err := ParsePrivateKey(b[:])
+		if err != nil {
+			continue
+		}
+		var m1, m2 limbs
+		scalarN.toMont(&m1, &k.c1)
+		scalarN.toMont(&m2, &k.c2)
+		if m1 != k.d1.v || m2 != k.d2.v {
+			t.Fatal("canonical and Montgomery shares differ")
+		}
+		if got, _ := k.Bytes(); got != b {
+			t.Fatal("Bytes does not return the parsed key")
+		}
+		k.Zero()
+		if k.c1 != (limbs{}) || k.c2 != (limbs{}) {
+			t.Fatal("Zero leaves the canonical shares")
+		}
 	}
 }

@@ -88,17 +88,26 @@ jobs:
 
   cross-arch:
     name: Other architectures (386 native; s390x big-endian, ppc64le, riscv64 under QEMU)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25.x"
           cache: false
-      - name: Install QEMU user-mode emulators
-        # "qemu-user" exists on Ubuntu 24.04 and 26.04; "qemu-user-static" is a
-        # virtual package without an installation candidate on 26.04.
-        run: sudo apt-get update -q && sudo apt-get install -y -q qemu-user
+      - name: Register QEMU user-mode emulators (binfmt_misc)
+        # Static QEMU emulators registered with the kernel (binfmt_misc), so
+        # s390x, ppc64le and riscv64 test binaries run directly. This does not
+        # depend on the Ubuntu package mirrors, whose name resolution failed
+        # on the runners (apt-get exit code 100, 2026-11-11).
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: s390x,ppc64le,riscv64
+      - name: Check the emulators are registered
+        run: |
+          for arch in s390x ppc64le riscv64; do
+            test -e "/proc/sys/fs/binfmt_misc/qemu-$arch" || { echo "qemu-$arch is not registered"; exit 1; }
+          done
       - name: 386 (native)
         run: GOARCH=386 go test -count=1 -short ./...
       - name: s390x, ppc64le, riscv64 (emulated; correctness only, no timing)
@@ -106,10 +115,10 @@ jobs:
           for arch in s390x ppc64le riscv64; do
             echo "== $arch"
             GOARCH=$arch go vet ./...
-            emu=$(command -v "qemu-$arch" || command -v "qemu-$arch-static")
             for pkg in keccak secp256k1 txsig account; do
               GOARCH=$arch go test -c -o "$RUNNER_TEMP/$pkg.$arch" "./$pkg"
-              (cd "$pkg" && "$emu" "$RUNNER_TEMP/$pkg.$arch" -test.short -test.count=1 -test.v | grep -E '^(--- |PASS|FAIL|ok)')
+              # Run through binfmt_misc; with pipefail a failing test fails the step.
+              (cd "$pkg" && "$RUNNER_TEMP/$pkg.$arch" -test.short -test.count=1 -test.v | grep -E '^(--- |PASS|FAIL|ok)')
             done
           done
       - name: secp256k1 compiled-code constant-time check (386, ppc64le, riscv64 machine code)

@@ -18,7 +18,8 @@
 // independent timing under PSTATE.DIT (Arm DIT list), which Sign and
 // PublicKey enable on processors with FEAT_DIT (Go >= 1.24). All inputs
 // are loaded before any output is stored, so z may alias x or y.
-// Squaring uses the product code with y = x.
+// Squaring computes the six cross products once, doubles them and adds
+// the four squares (20 instead of 32 MUL/UMULH).
 //
 // Registers: R3..R6 = x, R7..R10 = y (then n and m in the reduction),
 // R11..R17, R19, R20 = t0..t8, R21..R24 temporaries, R25 the constant.
@@ -151,79 +152,57 @@ TEXT ·fieldMul(SB), NOSPLIT, $0-24
 // func fieldSqr(z, x *limbs)
 TEXT ·fieldSqr(SB), NOSPLIT, $0-16
 	MOVD x+8(FP), R1
-	MOVD x+8(FP), R2
 	LDP (R1), (R3, R4)
 	LDP 16(R1), (R5, R6)
-	LDP (R2), (R7, R8)
-	LDP 16(R2), (R9, R10)
-	// Row 0: t0..t4 = x0·y (low halves, then high halves one word up).
-	MUL R7, R3, R11
-	MUL R8, R3, R12
-	MUL R9, R3, R13
-	MUL R10, R3, R14
-	MOVD ZR, R15
-	UMULH R7, R3, R21
-	UMULH R8, R3, R22
-	UMULH R9, R3, R23
-	UMULH R10, R3, R24
-	ADDS R21, R12, R12
-	ADCS R22, R13, R13
-	ADCS R23, R14, R14
-	ADC R24, R15, R15
-	// Row 1: t1..t5 += x1·y.
-	MUL R7, R4, R21
-	MUL R8, R4, R22
-	MUL R9, R4, R23
-	MUL R10, R4, R24
-	ADDS R21, R12, R12
-	ADCS R22, R13, R13
-	ADCS R23, R14, R14
-	ADCS R24, R15, R15
+	// Cross products x0·x1, x0·x2, x0·x3 at words 1..4.
+	MUL R4, R3, R12
+	UMULH R4, R3, R7
+	MUL R5, R3, R8
+	UMULH R5, R3, R9
+	MUL R6, R3, R10
+	UMULH R6, R3, R21
+	ADDS R8, R7, R13
+	ADCS R10, R9, R14
+	ADC ZR, R21, R15
+	// x1·x2 at words 3..4, x1·x3 at 4..5, x2·x3 at 5..6.
+	MUL R5, R4, R7
+	UMULH R5, R4, R8
+	MUL R6, R4, R9
+	UMULH R6, R4, R10
+	MUL R6, R5, R21
+	UMULH R6, R5, R22
+	ADDS R7, R14, R14
+	ADCS R8, R15, R15
 	ADC ZR, ZR, R16
-	UMULH R7, R4, R21
-	UMULH R8, R4, R22
-	UMULH R9, R4, R23
-	UMULH R10, R4, R24
-	ADDS R21, R13, R13
-	ADCS R22, R14, R14
-	ADCS R23, R15, R15
-	ADC R24, R16, R16
-	// Row 2: t2..t6 += x2·y.
-	MUL R7, R5, R21
-	MUL R8, R5, R22
-	MUL R9, R5, R23
-	MUL R10, R5, R24
-	ADDS R21, R13, R13
-	ADCS R22, R14, R14
-	ADCS R23, R15, R15
-	ADCS R24, R16, R16
+	ADDS R9, R15, R15
+	ADCS R10, R16, R16
 	ADC ZR, ZR, R17
-	UMULH R7, R5, R21
-	UMULH R8, R5, R22
-	UMULH R9, R5, R23
-	UMULH R10, R5, R24
-	ADDS R21, R14, R14
-	ADCS R22, R15, R15
-	ADCS R23, R16, R16
-	ADC R24, R17, R17
-	// Row 3: t3..t7 += x3·y.
-	MUL R7, R6, R21
-	MUL R8, R6, R22
-	MUL R9, R6, R23
-	MUL R10, R6, R24
-	ADDS R21, R14, R14
-	ADCS R22, R15, R15
-	ADCS R23, R16, R16
-	ADCS R24, R17, R17
+	ADDS R21, R16, R16
+	ADC R22, R17, R17
+	// Double the cross products (t7 receives the top bit).
+	ADDS R12, R12, R12
+	ADCS R13, R13, R13
+	ADCS R14, R14, R14
+	ADCS R15, R15, R15
+	ADCS R16, R16, R16
+	ADCS R17, R17, R17
 	ADC ZR, ZR, R19
-	UMULH R7, R6, R21
-	UMULH R8, R6, R22
-	UMULH R9, R6, R23
-	UMULH R10, R6, R24
-	ADDS R21, R15, R15
-	ADCS R22, R16, R16
-	ADCS R23, R17, R17
-	ADC R24, R19, R19
+	// Add the squares x_i^2 at words 2i, 2i+1.
+	MUL R3, R3, R11
+	UMULH R3, R3, R7
+	MUL R4, R4, R8
+	UMULH R4, R4, R9
+	MUL R5, R5, R10
+	UMULH R5, R5, R21
+	MUL R6, R6, R22
+	UMULH R6, R6, R23
+	ADDS R7, R12, R12
+	ADCS R8, R13, R13
+	ADCS R9, R14, R14
+	ADCS R10, R15, R15
+	ADCS R21, R16, R16
+	ADCS R22, R17, R17
+	ADC R23, R19, R19
 	// Reduction modulo p: fold t4..t7 with 2^256 ≡ c = 0x1000003D1; the top
 	// word r4 < 2^34 goes to t8.
 	MOVD $0x1000003D1, R25
@@ -470,79 +449,57 @@ TEXT ·scalarMul(SB), NOSPLIT, $0-32
 // func scalarSqr(z, x, n *limbs)
 TEXT ·scalarSqr(SB), NOSPLIT, $0-24
 	MOVD x+8(FP), R1
-	MOVD x+8(FP), R2
 	LDP (R1), (R3, R4)
 	LDP 16(R1), (R5, R6)
-	LDP (R2), (R7, R8)
-	LDP 16(R2), (R9, R10)
-	// Row 0: t0..t4 = x0·y (low halves, then high halves one word up).
-	MUL R7, R3, R11
-	MUL R8, R3, R12
-	MUL R9, R3, R13
-	MUL R10, R3, R14
-	MOVD ZR, R15
-	UMULH R7, R3, R21
-	UMULH R8, R3, R22
-	UMULH R9, R3, R23
-	UMULH R10, R3, R24
-	ADDS R21, R12, R12
-	ADCS R22, R13, R13
-	ADCS R23, R14, R14
-	ADC R24, R15, R15
-	// Row 1: t1..t5 += x1·y.
-	MUL R7, R4, R21
-	MUL R8, R4, R22
-	MUL R9, R4, R23
-	MUL R10, R4, R24
-	ADDS R21, R12, R12
-	ADCS R22, R13, R13
-	ADCS R23, R14, R14
-	ADCS R24, R15, R15
+	// Cross products x0·x1, x0·x2, x0·x3 at words 1..4.
+	MUL R4, R3, R12
+	UMULH R4, R3, R7
+	MUL R5, R3, R8
+	UMULH R5, R3, R9
+	MUL R6, R3, R10
+	UMULH R6, R3, R21
+	ADDS R8, R7, R13
+	ADCS R10, R9, R14
+	ADC ZR, R21, R15
+	// x1·x2 at words 3..4, x1·x3 at 4..5, x2·x3 at 5..6.
+	MUL R5, R4, R7
+	UMULH R5, R4, R8
+	MUL R6, R4, R9
+	UMULH R6, R4, R10
+	MUL R6, R5, R21
+	UMULH R6, R5, R22
+	ADDS R7, R14, R14
+	ADCS R8, R15, R15
 	ADC ZR, ZR, R16
-	UMULH R7, R4, R21
-	UMULH R8, R4, R22
-	UMULH R9, R4, R23
-	UMULH R10, R4, R24
-	ADDS R21, R13, R13
-	ADCS R22, R14, R14
-	ADCS R23, R15, R15
-	ADC R24, R16, R16
-	// Row 2: t2..t6 += x2·y.
-	MUL R7, R5, R21
-	MUL R8, R5, R22
-	MUL R9, R5, R23
-	MUL R10, R5, R24
-	ADDS R21, R13, R13
-	ADCS R22, R14, R14
-	ADCS R23, R15, R15
-	ADCS R24, R16, R16
+	ADDS R9, R15, R15
+	ADCS R10, R16, R16
 	ADC ZR, ZR, R17
-	UMULH R7, R5, R21
-	UMULH R8, R5, R22
-	UMULH R9, R5, R23
-	UMULH R10, R5, R24
-	ADDS R21, R14, R14
-	ADCS R22, R15, R15
-	ADCS R23, R16, R16
-	ADC R24, R17, R17
-	// Row 3: t3..t7 += x3·y.
-	MUL R7, R6, R21
-	MUL R8, R6, R22
-	MUL R9, R6, R23
-	MUL R10, R6, R24
-	ADDS R21, R14, R14
-	ADCS R22, R15, R15
-	ADCS R23, R16, R16
-	ADCS R24, R17, R17
+	ADDS R21, R16, R16
+	ADC R22, R17, R17
+	// Double the cross products (t7 receives the top bit).
+	ADDS R12, R12, R12
+	ADCS R13, R13, R13
+	ADCS R14, R14, R14
+	ADCS R15, R15, R15
+	ADCS R16, R16, R16
+	ADCS R17, R17, R17
 	ADC ZR, ZR, R19
-	UMULH R7, R6, R21
-	UMULH R8, R6, R22
-	UMULH R9, R6, R23
-	UMULH R10, R6, R24
-	ADDS R21, R15, R15
-	ADCS R22, R16, R16
-	ADCS R23, R17, R17
-	ADC R24, R19, R19
+	// Add the squares x_i^2 at words 2i, 2i+1.
+	MUL R3, R3, R11
+	UMULH R3, R3, R7
+	MUL R4, R4, R8
+	UMULH R4, R4, R9
+	MUL R5, R5, R10
+	UMULH R5, R5, R21
+	MUL R6, R6, R22
+	UMULH R6, R6, R23
+	ADDS R7, R12, R12
+	ADCS R8, R13, R13
+	ADCS R9, R14, R14
+	ADCS R10, R15, R15
+	ADCS R21, R16, R16
+	ADCS R22, R17, R17
+	ADC R23, R19, R19
 	// Montgomery reduction modulo n: four rows m = t_i·(-n^-1) mod 2^64,
 	// t += m·n·2^(64i); t8 collects the top carries.
 	MOVD n+16(FP), R2

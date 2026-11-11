@@ -77,6 +77,20 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: secp256k1 building blocks (in-package)
+        working-directory: secp256k1
+        run: |
+          go test -run '^$' -bench '^Benchmark(Sign|Verify|Recover|PublicKey|FieldMul|FieldSquare|FieldInv|FieldInvVartime|ScalarInv|ScalarInvVartime|ScalarBaseMult)$' \
+            -benchmem -count 6 -benchtime 200ms . | tee "$RESULTS/secp256k1-blocks.txt"
+          {
+            echo
+            echo "### secp256k1 building blocks"
+            echo
+            echo '```'
+            "$(go env GOPATH)/bin/benchstat" -filter '.unit:(sec/op)' "$RESULTS/secp256k1-blocks.txt"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Portable kernel variants (mem vs locals)
         working-directory: keccak
         run: |

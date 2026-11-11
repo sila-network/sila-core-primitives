@@ -35,9 +35,10 @@ import (
 	"sync/atomic"
 )
 
-// baseBlinding holds a secret scalar b and the point −b·G.
+// baseBlinding holds a secret value b (canonical, in [1, n-1]) and the
+// point −b·G.
 type baseBlinding struct {
-	b    scalar
+	b    limbs
 	negB point
 }
 
@@ -67,12 +68,14 @@ func newBaseBlinding(rand io.Reader) (*baseBlinding, error) {
 		if _, err := io.ReadFull(rand, buf[:]); err != nil {
 			return nil, err
 		}
-		if bl.b.setBytesCanonical(&buf)&(1^bl.b.isZero()) == 1 {
+		bl.b = limbsFromBytes(&buf)
+		if lessThan(&bl.b, &scalarN.m)&(1^isZeroLimbs(&bl.b)) == 1 {
 			break
 		}
 	}
+	one := fieldFromUint(1)
 	var bG point
-	bG.scalarBaseMult(&bl.b)
+	bG.scalarBaseMultCanonical(&bl.b, &one)
 	bl.negB.neg(&bG)
 	return bl, nil
 }
@@ -113,50 +116,40 @@ func currentBlinding() *baseBlinding {
 	return blindingState.Load()
 }
 
-// scalarBaseMultBlinded sets r = k·G, computing (k + b)·G + (−b·G) with
-// the process-wide blinding, or with fallback (b, −b·G) when no
-// process-wide blinding exists. Constant time with respect to k and b.
-func (r *point) scalarBaseMultBlinded(k *scalar, fallback func() (scalar, point)) *point {
-	var b scalar
+// scalarBaseMultShares sets r = (c1 + c2)·G for a secret given as two
+// canonical shares. With the secret blinding b (process-wide, or the
+// fallback when no process-wide blinding exists) it computes
+// ((c1 + b) + c2)·G + (−b·G): the sum is formed with modular additions
+// only (no multiplication takes it as an operand), and the fixed-base
+// multiplication runs with the projective randomiser lambda (fresh per
+// call; see scalarBaseMultCanonical), so its field multiplications do
+// not repeat across calls even when c1 + c2 and b do. Constant time.
+func (r *point) scalarBaseMultShares(c1, c2 *limbs, lambda *fieldElement, fallback func() (limbs, point)) *point {
+	var b limbs
 	var negB point
 	if bl := currentBlinding(); bl != nil {
 		b, negB = bl.b, bl.negB
 	} else {
 		b, negB = fallback()
 	}
-	r.scalarBaseMultWith(k, &b, &negB)
-	b.zero()
+	var t limbs
+	scalarN.add(&t, c1, &b)
+	scalarN.add(&t, &t, c2)
+	r.scalarBaseMultCanonical(&t, lambda)
+	r.add(r, &negB)
+	clear(t[:])
+	clear(b[:])
 	return r
 }
 
-// scalarBaseMultShares sets r = (s1 + s2)·G for a secret given as two
-// shares, computing ((s1 + b) + s2)·G + (−b·G): no intermediate value
-// equals the secret (constant time).
-func (r *point) scalarBaseMultShares(s1, s2 *scalar, fallback func() (scalar, point)) *point {
-	var b scalar
-	var negB point
-	if bl := currentBlinding(); bl != nil {
-		b, negB = bl.b, bl.negB
-	} else {
-		b, negB = fallback()
-	}
-	var t scalar
-	t.add(s1, &b)
-	r.scalarBaseMultWith(s2, &t, &negB)
-	t.zero()
-	b.zero()
-	return r
-}
-
-// scalarBaseMultWith sets r = (k + b)·G + negB, which is k·G when
-// negB = −b·G (constant time; complete formulas, so k + b = 0 is fine).
-func (r *point) scalarBaseMultWith(k, b *scalar, negB *point) *point {
-	var kb scalar
-	kb.add(k, b)
-	r.scalarBaseMult(&kb)
-	r.add(r, negB)
-	kb.zero()
-	return r
+// projectiveRandomiser returns the field element m (a secret mask below n,
+// hence below p) or 1 when m = 0, in constant time.
+func projectiveRandomiser(m *limbs) fieldElement {
+	var f fieldElement
+	f.v = *m
+	one := fieldFromUint(1)
+	f.selectFrom(&one, &f, f.isZero())
+	return f
 }
 
 // invMaskedShares sets z = (k·rho)⁻¹ for a secret k given as shares
@@ -226,4 +219,15 @@ func derivedBlinding(seed *[32]byte, label byte, withPoint bool, fresh *[32]byte
 		negP.neg(&p)
 	}
 	return s, negP
+}
+
+// derivedBaseBlinding returns a secret canonical value b in [1, n-1] and
+// −b·G, derived like derivedBlinding (same HMAC input, so the same value);
+// it is the fallback of scalarBaseMultShares when the process-wide
+// blinding cannot be created.
+func derivedBaseBlinding(seed *[32]byte, label byte, fresh *[32]byte) (limbs, point) {
+	s, negP := derivedBlinding(seed, label, true, fresh)
+	c := s.canonical()
+	s.zero()
+	return c, negP
 }

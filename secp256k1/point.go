@@ -339,13 +339,33 @@ func bitsAt(k *limbs, pos, n int) uint64 {
 
 // scalarBaseMult sets r = k·G in constant time with respect to k: 52
 // complete mixed additions with constant-time lookups, conditional
-// negations and conditional skips, and no doublings.
+// negations and conditional skips, and no doublings. It is used for fresh
+// random values (blinding points); the signing and key paths use
+// scalarBaseMultCanonical on a blinded canonical sum.
 func (r *point) scalarBaseMult(k *scalar) *point {
 	kc := k.canonical()
+	one := fieldFromUint(1)
+	r.scalarBaseMultCanonical(&kc, &one)
+	kc = limbs{}
+	return r
+}
+
+// scalarBaseMultCanonical sets r = k·G for a canonical k (k < n), in
+// constant time with respect to k, without any multiplication that takes
+// k as an operand (Booth digits are extracted with shifts and masks).
+// The accumulator starts as the identity (0 : lambda : 0); the complete
+// formulas are homogeneous, so every intermediate coordinate is the
+// projective representation scaled by lambda. With a fresh secret lambda
+// per call (lambda != 0), the field multiplications of two calls on the
+// same k see unrelated operands.
+func (r *point) scalarBaseMultCanonical(k *limbs, lambda *fieldElement) *point {
+	kc := *k
 	var acc, sum point
 	var sel affinePoint
 	var negY fieldElement
-	acc.setIdentity()
+	acc.x.setZero()
+	acc.y = *lambda
+	acc.z.setZero()
 	for w := 0; w < baseWindows; w++ {
 		mag, neg := boothDigit(&kc, w)
 		sel.lookupAffine(&baseTable[w], mag)

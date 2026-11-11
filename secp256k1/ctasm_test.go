@@ -93,7 +93,7 @@ func TestCompiledLoopsAreCounterBound(t *testing.T) {
 		lookupAffine = `secp256k1\.lookupAffineNEON\.abi0`
 	}
 	for _, pat := range []string{
-		`secp256k1\.\(\*point\)\.(lookup|scalarBaseMult|scalarMult)`,
+		`secp256k1\.\(\*point\)\.(lookup|scalarBaseMult|scalarBaseMultCanonical|scalarMult)`,
 		lookupAffine,
 		`secp256k1\.boothDigit`,
 		`secp256k1\.\(\*scalar\)\.(inv|sqrN)`,

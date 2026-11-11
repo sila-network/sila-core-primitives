@@ -270,8 +270,12 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 		scalarN.toMont(&k1.v, &m)
 		scalarN.toMont(&k2.v, &kc2)
 		clear(kc[:])
-		clear(kc2[:])
-		clear(m[:])
+		// Projective randomiser of k·G (finding S-15): fresh per
+		// signature, so that the field operations of the fixed-base
+		// multiplication never repeat, even for a repeated nonce.
+		zl := derivedMaskLimbs(&nonces.k, 'Z', &fresh)
+		lambda := projectiveRandomiser(&zl)
+		clear(zl[:])
 		// Per-signature inversion blinding rho.
 		rho, _ := derivedBlinding(&nonces.k, 'I', false, &fresh)
 		// Per-signature re-randomisation of the key shares (local copies;
@@ -284,9 +288,12 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 		d1.add(&priv.d1, &t)
 		d2.sub(&priv.d2, &t)
 		t.zero()
-		sig, ok := signWithNonce(&d1, &d2, &z, &k1, &k2, &rho, func() (scalar, point) {
-			return derivedBlinding(&nonces.k, 'B', true, &fresh)
+		sig, ok := signWithNonce(&d1, &d2, &z, &k1, &k2, &m, &kc2, &lambda, &rho, func() (limbs, point) {
+			return derivedBaseBlinding(&nonces.k, 'B', &fresh)
 		})
+		clear(m[:])
+		clear(kc2[:])
+		lambda.v = limbs{}
 		rho.zero()
 		k1.zero()
 		k2.zero()
@@ -298,12 +305,13 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 	}
 }
 
-// signWithNonce computes (r, s, v) for a given nonce k. It returns false
-// if r or s is zero (probability about 2^-256), in which case the caller
-// continues with the next nonce.
-func signWithNonce(d1, d2, z, k1, k2, rho *scalar, fallback func() (scalar, point)) (Signature, bool) {
+// signWithNonce computes (r, s, v) for a given nonce k, given as
+// Montgomery shares k1 + k2 and as the same shares in canonical form
+// c1 + c2 (for k·G). It returns false if r or s is zero (probability
+// about 2^-256), in which case the caller continues with the next nonce.
+func signWithNonce(d1, d2, z, k1, k2 *scalar, c1, c2 *limbs, lambda *fieldElement, rho *scalar, fallback func() (limbs, point)) (Signature, bool) {
 	var R point
-	R.scalarBaseMultShares(k1, k2, fallback)
+	R.scalarBaseMultShares(c1, c2, lambda, fallback)
 	x, y, _ := R.affine()
 	xb := x.bytes()
 

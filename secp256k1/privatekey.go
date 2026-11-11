@@ -144,12 +144,22 @@ func (k *PrivateKey) PublicKey() (PublicKey, error) {
 	var pub PublicKey
 	var err error
 	withDIT(func() {
+		// Fresh projective randomiser for d·G (finding S-15), derived
+		// from the key and fresh random bytes (from the key alone if the
+		// random source fails).
+		var fresh [32]byte
+		readFresh(&fresh)
+		seed := k.dBytes()
+		zl := derivedMaskLimbs(&seed, 'Z', &fresh)
+		lambda := projectiveRandomiser(&zl)
+		clear(zl[:])
+		clear(fresh[:])
 		var p point
-		p.scalarBaseMultShares(&k.d1, &k.d2, func() (scalar, point) {
-			seed := k.dBytes()
-			defer clear(seed[:])
-			return derivedBlinding(&seed, 'P', true, nil)
+		p.scalarBaseMultShares(&k.c1, &k.c2, &lambda, func() (limbs, point) {
+			return derivedBaseBlinding(&seed, 'P', nil)
 		})
+		clear(seed[:])
+		lambda.v = limbs{}
 		pub, err = publicKeyFromPoint(&p)
 	})
 	return pub, err

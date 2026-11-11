@@ -13,44 +13,59 @@ import (
 	"io"
 	"math/big"
 	"math/rand"
+	"slices"
 	"sync"
 	"testing"
 )
 
-// The blinded computations return exactly the unblinded results for edge
-// and random scalars, including k + b = 0 and k = 0.
+// The blinded fixed-base multiplication from canonical shares returns
+// exactly k·G for edge and random scalars, including c1 + c2 + b = 0 and
+// k = 0, with the process-wide blinding and with the fallback, for any
+// projective randomiser; the randomiser changes the projective
+// coordinates (finding S-15) but not the point.
 func TestBlindedBaseMultMatchesPlain(t *testing.T) {
 	rng := rand.New(rand.NewSource(80))
 	bl := currentBlinding()
 	if bl == nil {
 		t.Fatal("no process-wide blinding")
 	}
-	var negb scalar
-	negb.neg(&bl.b)
-	ks := []scalar{negb, scalarFromBig(big.NewInt(0)), scalarFromBig(big.NewInt(1)),
-		scalarFromBig(new(big.Int).Sub(bigN, big.NewInt(1)))}
+	var negb limbs
+	scalarN.neg(&negb, &bl.b)
+	ks := []limbs{negb, {}, {1}, {scalarN.m[0] - 1, scalarN.m[1], scalarN.m[2], scalarN.m[3]}}
 	for _, k := range interesting(rng, bigN, 300) {
-		ks = append(ks, scalarFromBig(k))
+		ks = append(ks, bigToLimbs(k))
 	}
 	seed := [32]byte{9}
-	fb, fnegB := derivedBlinding(&seed, 'B', true, nil)
-	for i := range ks {
-		var want, got, got2 point
-		want.scalarBaseMult(&ks[i])
-		got.scalarBaseMultBlinded(&ks[i], nil)
-		got2.scalarBaseMultWith(&ks[i], &fb, &fnegB) // fallback path
-		if got.equal(&want) != 1 || got2.equal(&want) != 1 {
+	fbc, fnegB := derivedBaseBlinding(&seed, 'B', nil)
+	fallback := func() (limbs, point) { return fbc, fnegB }
+	var negfb limbs
+	scalarN.neg(&negfb, &fbc)
+	for i, k := range append(ks, negfb) {
+		var ks scalar
+		scalarN.toMont(&ks.v, &k)
+		var want point
+		want.scalarBaseMult(&ks)
+		// Shares c1 (random) and c2 = k - c1.
+		c1 := bigToLimbs(new(big.Int).Rand(rng, bigN))
+		var c2 limbs
+		scalarN.sub(&c2, &k, &c1)
+		l1 := projectiveRandomiser(&c1)
+		l2 := fieldFromUint(uint64(i) + 2)
+		var got1, got2, got3 point
+		got1.scalarBaseMultShares(&c1, &c2, &l1, fallback)
+		got2.scalarBaseMultShares(&c1, &c2, &l2, fallback)
+		// Fallback path: no process-wide blinding.
+		blindingState.Store(nil)
+		withRandomSource(t, failingReader{}, func() {
+			got3.scalarBaseMultShares(&c1, &c2, &l1, fallback)
+		})
+		blindingState.Store(bl)
+		if got1.equal(&want) != 1 || got2.equal(&want) != 1 || got3.equal(&want) != 1 {
 			t.Fatalf("blinded k·G differs for case %d", i)
 		}
-	}
-	// Fallback for -b of the derived blinding: (k + b) = 0.
-	var negfb scalar
-	negfb.neg(&fb)
-	var want, got point
-	want.scalarBaseMult(&negfb)
-	got.scalarBaseMultWith(&negfb, &fb, &fnegB)
-	if got.equal(&want) != 1 {
-		t.Fatal("k + b = 0 case")
+		if want.isIdentity() == 0 && got1.x == got2.x && got1.z == got2.z {
+			t.Fatalf("case %d: the projective randomiser did not change the coordinates", i)
+		}
 	}
 }
 
@@ -350,7 +365,7 @@ func TestSignFreshMasks(t *testing.T) {
 	// Different fresh bytes give different masks for the same K.
 	var k, f1, f2 [32]byte
 	k[0], f2[0] = 1, 1
-	for _, label := range []byte{'K', 'D'} {
+	for _, label := range []byte{'K', 'D', 'Z'} {
 		a := derivedMaskLimbs(&k, label, &f1)
 		b := derivedMaskLimbs(&k, label, &f2)
 		c := derivedMaskLimbs(&k, label, nil)
@@ -372,47 +387,52 @@ func TestSignFreshMasks(t *testing.T) {
 // canonical and Montgomery shares must describe the same d.
 func TestKeyReconstructionHasNoMultiplication(t *testing.T) {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "privatekey.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
 	forbidden := map[string]bool{
 		"mul": true, "square": true, "sqrN": true, "inv": true, "invFermat": true,
 		"toMont": true, "fromMont": true, "canonical": true, "scalarMul": true,
 		"scalarSqr": true, "mulWords": true, "montReduceN": true,
 	}
-	checked := 0
-	for _, decl := range f.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Body == nil {
-			continue
-		}
-		switch fn.Name.Name {
-		case "canonicalD", "dBytes", "Bytes":
-		default:
-			continue
-		}
-		checked++
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			var name string
-			switch c := call.Fun.(type) {
-			case *ast.Ident:
-				name = c.Name
-			case *ast.SelectorExpr:
-				name = c.Sel.Name
-			}
-			if forbidden[name] {
-				t.Errorf("%s: %s calls %s on the key reconstruction path", fset.Position(call.Pos()), fn.Name.Name, name)
-			}
-			return true
-		})
+	// Functions that handle the secret sum itself: the key reconstruction
+	// (S-14) and the blinded fixed-base multiplication, whose input c1 +
+	// c2 + b is formed and consumed without multiplications (S-15).
+	targets := map[string][]string{
+		"privatekey.go": {"canonicalD", "dBytes", "Bytes"},
+		"blinding.go":   {"scalarBaseMultShares"},
+		"point.go":      {"scalarBaseMultCanonical"},
 	}
-	if checked != 3 {
-		t.Fatalf("checked %d of 3 reconstruction functions", checked)
+	checked := 0
+	for file, names := range targets {
+		f, err := parser.ParseFile(fset, file, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || !slices.Contains(names, fn.Name.Name) {
+				continue
+			}
+			checked++
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				var name string
+				switch c := call.Fun.(type) {
+				case *ast.Ident:
+					name = c.Name
+				case *ast.SelectorExpr:
+					name = c.Sel.Name
+				}
+				if forbidden[name] {
+					t.Errorf("%s: %s calls %s on a secret-sum path", fset.Position(call.Pos()), fn.Name.Name, name)
+				}
+				return true
+			})
+		}
+	}
+	if checked != 5 {
+		t.Fatalf("checked %d of 5 functions", checked)
 	}
 	// The canonical shares and the Montgomery shares agree with d.
 	for i := 0; i < 200; i++ {

@@ -46,7 +46,11 @@ func welchT(a, b []float64) float64 {
 }
 
 // crop removes the slowest samples (interrupts, preemption), as dudect does.
+// keep >= 1 returns all samples.
 func crop(x []float64, keep float64) []float64 {
+	if keep >= 1 {
+		return append([]float64(nil), x...)
+	}
 	s := append([]float64(nil), x...)
 	sort.Float64s(s)
 	limit := s[int(float64(len(s))*keep)]
@@ -63,8 +67,16 @@ func crop(x []float64, keep float64) []float64 {
 // magnitude over the cropping levels, keeping its sign (a's mean minus b's).
 func measureClassesSigned(samples int, load func(class, i int), run func()) float64 {
 	a, b := sampleClasses(samples, load, run)
+	return maxAbsWelch(a, b)
+}
+
+// maxAbsWelch returns the Welch t statistic with the largest magnitude
+// over the cropping levels, including the uncropped samples (a leak that
+// only affects the slowest observations of one class is removed by every
+// crop; TestTimingDetectorTailLeak is the negative control).
+func maxAbsWelch(a, b []float64) float64 {
 	best := 0.0
-	for _, keep := range []float64{0.5, 0.75, 0.9} {
+	for _, keep := range []float64{0.5, 0.75, 0.9, 1} {
 		tv := welchT(crop(a, keep), crop(b, keep))
 		if math.Abs(tv) > math.Abs(best) {
 			best = tv
@@ -163,15 +175,21 @@ func TestConstantTimeStatistical(t *testing.T) {
 	}
 	idx := 0
 	// load copies the secret into the fixed inputs (untimed); run is timed.
-	var in1, in2 scalar // shares of in (k = in1 + in2), as in signing
+	var in1, in2 scalar  // shares of in (k = in1 + in2), as in signing
+	var in1c, in2c limbs // the same shares in canonical form (k·G)
+	var lam fieldElement // projective randomiser of k·G
 	// Keys are parsed once per secret set (setShares, as ParsePrivateKey)
 	// and then reused for every sample of that secret, as a long-lived key
 	// is in production: the timed Sign re-randomises its shares itself.
+	// The selected key is copied (untimed) into the one fixed PrivateKey
+	// the timed code reads, so both classes use the same address.
 	loadScalar := func(k *scalar, kp *PrivateKey) {
 		in = *k
 		in1 = rhos[(idx+128)&255]
 		in2.sub(k, &in1)
-		key = kp
+		in1c, in2c = in1.canonical(), in2.canonical()
+		lam = ys[(idx*7)&63]
+		*key = *kp
 		idx++
 	}
 	mkKeys := func(x []scalar) []PrivateKey {
@@ -203,7 +221,7 @@ func TestConstantTimeStatistical(t *testing.T) {
 		{"diag: raw inverse", true, func() { sinkS.inv(&in) }},
 		{"diag: raw k·G", true, func() { sink.scalarBaseMult(&in) }},
 		{"masked inverse", false, func() { sinkS.invMaskedShares(&in1, &in2, &rhos[idx&255]) }},
-		{"masked k·G", false, func() { sink.scalarBaseMultShares(&in1, &in2, nil) }},
+		{"masked k·G", false, func() { sink.scalarBaseMultShares(&in1c, &in2c, &lam, nil) }},
 		{"Sign", false, func() { Sign(key, digest) }},
 		{"PublicKey", false, func() { sinkP, _ = key.PublicKey() }},
 	}
@@ -279,5 +297,38 @@ func fieldFromRand(rng *rand.Rand) fieldElement {
 		if f.setBytes(&b) == 1 {
 			return f
 		}
+	}
+}
+
+// TestTimingDetectorTailLeak is a negative control for the detector: two
+// classes with the same baseline distribution, where 5 % of one class's
+// observations are slow. Every crop removes the slow tail; the uncropped
+// comparison must still report the difference.
+func TestTimingDetectorTailLeak(t *testing.T) {
+	rng := rand.New(rand.NewSource(5))
+	const n = 10000
+	a, b := make([]float64, n), make([]float64, n)
+	for i := 0; i < n; i++ {
+		a[i] = 1000 + rng.NormFloat64()*10
+		b[i] = 1000 + rng.NormFloat64()*10
+		if i%20 == 0 {
+			a[i] += 300 // the leaking minority
+		}
+	}
+	for _, keep := range []float64{0.5, 0.75, 0.9} {
+		if v := math.Abs(welchT(crop(a, keep), crop(b, keep))); v > 4.5 {
+			t.Logf("crop %.2f alone detects it (t = %.2f)", keep, v)
+		}
+	}
+	if v := math.Abs(maxAbsWelch(a, b)); v <= 4.5 {
+		t.Fatalf("tail-only leak not detected: |t| = %.2f", v)
+	}
+	// Identical distributions stay below the bound.
+	c := make([]float64, n)
+	for i := range c {
+		c[i] = 1000 + rng.NormFloat64()*10
+	}
+	if v := math.Abs(maxAbsWelch(c, b)); v > 4.5 {
+		t.Fatalf("false positive on identical distributions: |t| = %.2f", v)
 	}
 }

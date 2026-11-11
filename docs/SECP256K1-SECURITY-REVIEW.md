@@ -66,8 +66,17 @@ Constant-time techniques:
   multiplication and squaring with MULX/ADCX/ADOX (when CPUID reports
   BMI2 + ADX) or MULQ, and the SSE2 scan of the fixed-base table. Straight
   line, no data-dependent address; the only branch is the CPU dispatch on
-  the start-up constant `useADX`. Other architectures and `-tags purego`
-  use the Go code.
+  the start-up constant `useADX`.
+- arm64 assembly (`field_arm64.s`): field and scalar (Montgomery)
+  multiplication and squaring (MUL, UMULH, ADD/ADDS/ADCS/ADC,
+  SUBS/SBCS, CSEL; no CPU dispatch) and the NEON scan of the fixed-base
+  table. Straight line, every memory access at a fixed offset from an
+  argument pointer; enforced by a source allow-list
+  (`TestArm64AsmSourceIsStraightLine`) and by a check of the compiled
+  code (`TestCompiledArm64AsmIsStraightLine`); results are compared with
+  the Go code under QEMU, including the rare final-reduction cases
+  (`field_boundary_test.go`). These instructions are on Arm's DIT list.
+  Other architectures and `-tags purego` use the Go code.
 - Scalar and field inversions (the blinded k·ρ, the Z of k·G, the
   affine conversion of PublicKey): constant-time divstep algorithm
   (Bernstein–Yang) in its half-delta form, always 10 × 62 = 620 divsteps,
@@ -314,14 +323,17 @@ random-vs-random controls stay below 4.5 in at least 9 of 10 runs.
 6. **Protocol integration is not specified** (contract §7): the transaction
    encoding, chain identifier, domain separation and address text format.
    The library defines none of them.
-7. **Performance:** against libsecp256k1 (C) SILA is faster on the
-   development VM but 5–14 % slower on the GitHub amd64 runner and 18–27 %
-   slower on arm64 (`SECP256K1-PERFORMANCE.md`). Node-level throughput
-   must be sized on the measured numbers for the target CPU.
-8. **Assembly review surface:** the amd64 field/scalar/table assembly is
-   new (2026-11-11) and covered only by the automated checks above; it is
-   part of the independent audit (§6.3). The x86 timing guarantee for
-   MULX/ADCX/ADOX/MULQ holds under DOIT (not available here).
+7. **Performance:** against libsecp256k1 (C), at `3561401` SILA is
+   faster in Sign, Verify and Recover on the GitHub arm64 (Neoverse-N2)
+   and AMD EPYC runners, but the amd64 result depends on the CPU (on an
+   Intel Xeon runner libsecp256k1 was faster on Sign and Recover at
+   `2e26a3b`); see `SECP256K1-PERFORMANCE.md`. Node-level throughput must
+   be sized on the measured numbers for the target CPU.
+8. **Assembly review surface:** the amd64 and arm64 field/scalar/table
+   assembly is new (2026-11-11) and covered only by the automated checks
+   above and AI code review; it is part of the independent audit (§6.3).
+   The x86 timing guarantee for MULX/ADCX/ADOX/MULQ holds under DOIT, the
+   Arm one under DIT (dedicated measurements not available here).
 9. **PublicKey repeats a masked operand:** `PrivateKey.PublicKey` converts
    (d + b)·R out of Montgomery form, where b is the process-wide blinding;
    repeated calls with the same key use the same masked value until

@@ -6,7 +6,39 @@ go-ethereum v1.17.10's cgo binding) and decred dcrd secp256k1/v4 v4.0.1
 (pure Go). The benchmark `BenchmarkSecp256k1` uses the same key and digest
 for every implementation and calls each one through its public API.
 
-## Current state (2026-11-11, performance round 2)
+## Current state (2026-11-11, performance round 3, head `3561401`)
+
+Results on GitHub runners, SILA versus libsecp256k1 (go-ethereum
+v1.17.10 cgo binding), same job and inputs, `benchstat` medians, n = 6,
+Benchmarks run [#43025834696](https://github.com/sila-network/sila-core-primitives/actions/runs/43025834696):
+
+| Runner (CPU) | Sign | Verify | Recover |
+|---|---|---|---|
+| ubuntu-24.04-arm (Neoverse-N2) | **25.10 vs 26.51 µs: SILA 5.6 % faster** | **32.57 vs 33.65 µs: SILA 3.3 % faster** | **38.48 vs 38.98 µs: SILA 1.3 % faster** |
+| ubuntu-latest (AMD EPYC 9V74) | **22.53 vs 22.70 µs: SILA 0.8 % faster** | **29.75 vs 36.31 µs: SILA 22 % faster** | **35.36 vs 42.00 µs: SILA 19 % faster** |
+
+All six differences have p = 0.002. The amd64 result depends on the
+runner's CPU: on an Intel Xeon Platinum 8573C runner (run of `2e26a3b`,
+before the last two steps) libsecp256k1 was 1.5 % faster on Sign and 6 %
+faster on Recover, with Verify not significantly different. Shared
+runners are not dedicated hardware; these are not timing-leak results.
+
+Round 3 changes on arm64 (each measured on ubuntu-24.04-arm against the
+previous commit; changes without a measured gain were reverted with a
+new commit: shift-based squaring `08a9aa7`, fused fieldMul reduction
+`a591f58`, paired subtraction `07ec5d5`, batched variable-time divsteps
+(not committed)):
+
+| Change | Paths | Constant time? | Effect (arm64) |
+|---|---|---|---|
+| arm64 assembly: field/scalar multiplication and squaring (MUL/UMULH, ADDS/ADCS, CSEL), NEON base-table scan | all | yes (straight line; source allow-list and compiled-code checks) | Sign 32.9 → 27.2 µs, Verify 45.8 → 38.3 µs |
+| Products from four independent 2×2 products; final reduction as two parallel sums selected by the carry | all | yes | FieldMul 17.9 → 15.2 ns |
+| Half-delta constant-time divsteps, 620 instead of 744 | Sign, PublicKey | yes | Sign 27.0 → 25.6 µs |
+| Fewer field additions in the public formulas (8M + 3S mixed addition, no negations in the doubling); fused subtraction helpers; 3T − L² in the doubling | Verify, Recover | no — public inputs only | Verify 38.8 → 34.7 µs |
+| wNAF skips runs of zero digits | Verify, Recover | no — public | Verify 34.7 → 33.4 µs |
+| GLV split in integer arithmetic modulo 2^192 | Verify, Recover | no — public | Verify 33.3 → 32.6 µs |
+
+## Round 2 (2026-11-11)
 
 What changed (each step measured A/B against the previous commit and
 checked by the full test suite; see the commit messages):
@@ -36,14 +68,10 @@ added about 7 % to Sign. On the GitHub amd64 runner the gap is 5–14 %, on
 arm64 18–27 % (no assembly there). Before this round the gap on the
 development VM was 12 % (Sign) and 33 % (Verify, Recover).
 
-Remaining technical reasons for the gap: libsecp256k1 uses 5×52-bit
-limbs with lazy reduction (no canonical correction after every
-operation) and a dedicated `half`-based doubling everywhere; SILA keeps
-every field element canonical (one conditional correction per operation)
-and has assembly only on amd64. Next candidates, each needing the same
-evidence: arm64 assembly for the field (UMULH, with the same branch and
-allow-list checks), lazy reduction in the variable-time path, and a
-precomputed (not runtime-built) G table. Raw data:
+Technical reasons for the round-2 gap (since addressed in round 3 by
+arm64 assembly and the public-path changes above): libsecp256k1 uses
+5×52-bit limbs with lazy reduction; SILA keeps every field element
+canonical and then had assembly only on amd64. Raw data:
 `benchmarks/geth-compare/results/local-2026-11-11-secp256k1-r3/` — the
 development-VM run of `d3a76d3`, and a run of `515377b` (after S-12/S-13)
 on a second, much noisier VM (spread ±15–50 %, libsecp256k1 itself 46–48

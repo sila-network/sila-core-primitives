@@ -67,7 +67,7 @@ TEXT ·fieldMul(SB), NOSPLIT, $0-24
 	ADDS R24, R16, R16
 	ADCS R0, R17, R17
 	ADC ZR, R19, R19
-	// M = x_lo·y_hi + x_hi·y_lo (five words, M4 <= 1).
+	// M = x_lo·y_hi + x_hi·y_lo (five words).
 	MUL R9, R3, R20
 	UMULH R9, R3, R0
 	MUL R10, R3, R1
@@ -101,50 +101,41 @@ TEXT ·fieldMul(SB), NOSPLIT, $0-24
 	ADCS R9, R22, R22
 	ADCS R10, R23, R23
 	ADC ZR, ZR, R24
-	// r = LL + HH·c with 2^256 ≡ c = 0x1000003D1 (r4 = R6 < 2^35).
-	MOVD $0x1000003D1, R25
-	MUL R25, R15, R0
-	MUL R25, R16, R1
-	MUL R25, R17, R2
-	MUL R25, R19, R5
-	ADDS R0, R11, R11
-	ADCS R1, R12, R12
-	ADCS R2, R13, R13
-	ADCS R5, R14, R14
-	ADC ZR, ZR, R6
-	UMULH R25, R15, R0
-	UMULH R25, R16, R1
-	UMULH R25, R17, R2
-	UMULH R25, R19, R5
-	ADDS R0, R12, R12
-	ADCS R1, R13, R13
-	ADCS R2, R14, R14
-	ADC R5, R6, R6
-	// P = M_hi·c = (M2 + M3·2^64 + M4·2^128)·c, three words.
-	MUL R25, R22, R0
-	UMULH R25, R22, R1
-	MUL R25, R23, R2
-	UMULH R25, R23, R5
-	MUL R25, R24, R7
-	ADDS R2, R1, R1
-	ADC R7, R5, R5
-	// r += M_lo·2^128, then r += P.
+	// t2..t7 += M.
 	ADDS R20, R13, R13
 	ADCS R21, R14, R14
-	ADC ZR, R6, R6
-	ADDS R0, R11, R11
-	ADCS R1, R12, R12
-	ADCS R5, R13, R13
-	ADCS ZR, R14, R14
-	ADC ZR, R6, R6
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADC ZR, R19, R19
+	// Reduction modulo p: fold t4..t7 with 2^256 ≡ c = 0x1000003D1; the top
+	// word r4 < 2^34 goes to t8.
+	MOVD $0x1000003D1, R25
+	MUL R25, R15, R21
+	MUL R25, R16, R22
+	MUL R25, R17, R23
+	MUL R25, R19, R24
+	ADDS R21, R11, R11
+	ADCS R22, R12, R12
+	ADCS R23, R13, R13
+	ADCS R24, R14, R14
+	ADC ZR, ZR, R20
+	UMULH R25, R15, R21
+	UMULH R25, R16, R22
+	UMULH R25, R17, R23
+	UMULH R25, R19, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADC R24, R20, R20
 	// Second fold and final correction, as two independent sums:
 	// v = t + r4·c and u = t + (r4 + 1)·c = v + c, with r4 < 2^34.
 	// v < 2^256 + 2^68, so v >= p exactly when u >= 2^256 (u carries
 	// out of four words), and then v - p = u mod 2^256 < p; otherwise
 	// v < p and the result is v.
-	ADD $1, R6, R0
-	MUL R25, R6, R1
-	UMULH R25, R6, R2
+	ADD $1, R20, R0
+	MUL R25, R20, R1
+	UMULH R25, R20, R2
 	MUL R25, R0, R7
 	UMULH R25, R0, R8
 	ADDS R1, R11, R9
@@ -238,7 +229,6 @@ TEXT ·fieldSqr(SB), NOSPLIT, $0-16
 	ADCS R22, R13, R13
 	ADCS R23, R14, R14
 	ADC R24, R20, R20
-
 	// Second fold and final correction, as two independent sums:
 	// v = t + r4·c and u = t + (r4 + 1)·c = v + c, with r4 < 2^34.
 	// v < 2^256 + 2^68, so v >= p exactly when u >= 2^256 (u carries

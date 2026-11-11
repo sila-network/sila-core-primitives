@@ -223,7 +223,7 @@ func TestSignHedged(t *testing.T) {
 	if _, err := SignWithExtraEntropy(nil, digest, [32]byte{}); !errors.Is(err, ErrInvalidPrivateKey) {
 		t.Fatal("nil key accepted")
 	}
-	if n := testing.AllocsPerRun(20, func() { SignWithExtraEntropy(priv, digest, [32]byte{1}) }); n != 0 {
+	if n := testing.AllocsPerRun(20, func() { SignWithExtraEntropy(priv, digest, [32]byte{1}) }); n != 0 && !raceEnabled {
 		t.Fatalf("SignWithExtraEntropy allocates %v times", n)
 	}
 }

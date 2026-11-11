@@ -396,6 +396,9 @@ func TestSignDoesNotAllocate(t *testing.T) {
 	rng := rand.New(rand.NewSource(16))
 	priv := testKey(t, rng)
 	digest := sha256.Sum256([]byte("alloc"))
+	if raceEnabled {
+		t.Skip("allocation counts are not meaningful under -race")
+	}
 	if n := testing.AllocsPerRun(20, func() { Sign(priv, digest) }); n != 0 {
 		t.Fatalf("Sign allocates %v times", n)
 	}

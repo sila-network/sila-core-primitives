@@ -35,9 +35,7 @@ type jacobian struct {
 	inf     bool
 }
 
-// jacDoubleGo is the portable doubling (jacDouble on architectures
-// without vartime_arm64.s, and the reference it is tested against).
-func jacDoubleGo(r, p *jacobian) {
+func jacDouble(r, p *jacobian) {
 	if p.inf {
 		r.inf = true
 		return

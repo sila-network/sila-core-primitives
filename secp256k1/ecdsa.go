@@ -529,24 +529,3 @@ func hmacSHA256(key *[32]byte, parts ...[]byte) [32]byte {
 	clear(inner[:])
 	return sha256.Sum256(outer[:])
 }
-
-// readFresh fills b from the package random source, or with zeros if the
-// source fails. With the default source it calls crypto/rand.Read
-// directly, which keeps b on the stack (an io.Reader interface call would
-// move it to the heap); tests replace the source to exercise failures.
-func readFresh(b *[32]byte) {
-	var err error
-	if randomSource == cryptorand.Reader {
-		_, err = cryptorand.Read(b[:])
-	} else {
-		// Replaced source (tests): read through a separate buffer so that
-		// b itself never reaches an interface call.
-		buf := make([]byte, len(b))
-		_, err = io.ReadFull(randomSource, buf)
-		copy(b[:], buf)
-		clear(buf)
-	}
-	if err != nil {
-		clear(b[:])
-	}
-}

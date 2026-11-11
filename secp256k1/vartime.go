@@ -302,9 +302,12 @@ var glvTableG, glvTableLG = func() (*[1 << (glvWindowG - 2)]affinePoint, *[1 << 
 	return &t, &lt
 }()
 
-// linearCombinationVartime sets out = u1·G + u2·q for PUBLIC u1, u2 and q
-// (any point, including the identity).
-func linearCombinationVartime(out *point, u1, u2 *scalar, q *point) {
+// linearCombinationVartimeGeneric sets out = u1·G + u2·q for PUBLIC u1, u2
+// and q (any point, including the identity), with general Jacobian
+// additions for the multiples of q. It is the fallback of
+// linearCombinationVartime for the exceptional table cases and the
+// reference it is tested against.
+func linearCombinationVartimeGeneric(out *point, u1, u2 *scalar, q *point) {
 	a1, a2, na1, na2 := splitScalarVartime(u1)
 	da1, ta1 := wnafVartime(&a1, glvWindowG)
 	da2, ta2 := wnafVartime(&a2, glvWindowG)
@@ -320,7 +323,7 @@ func linearCombinationVartime(out *point, u1, u2 *scalar, q *point) {
 			qa.x, qa.y = q.x, q.y
 		} else {
 			var zinv fieldElement
-			zinv.inv(&q.z)
+			zinv.invVartime(&q.z)
 			qa.x.mul(&q.x, &zinv)
 			qa.y.mul(&q.y, &zinv)
 		}
@@ -377,6 +380,246 @@ func linearCombinationVartime(out *point, u1, u2 *scalar, q *point) {
 		}
 	}
 	jacToProjective(out, &acc)
+}
+
+// publicKeyFromPointVartime is publicKeyFromPoint for a PUBLIC point
+// (recovered keys): the affine conversion uses the variable-time
+// inversion.
+func publicKeyFromPointVartime(p *point) (PublicKey, error) {
+	if p.isIdentity() == 1 {
+		return PublicKey{}, ErrInvalidPublicKey
+	}
+	var zinv, x, y fieldElement
+	zinv.invVartime(&p.z)
+	x.mul(&p.x, &zinv)
+	y.mul(&p.y, &zinv)
+	return PublicKey{x: x.bytes(), y: y.bytes(), valid: true}, nil
+}
+
+// linearCombinationVartime sets out = u1·G + u2·q for PUBLIC u1, u2 and q
+// (any point, including the identity). Same digits as the generic version,
+// with the "effective affine" technique for q:
+//
+//   - the odd multiples (2i+1)·q are built so that they all share one
+//     Jacobian Z (co-Z table, from additions of 2q treated as affine on an
+//     isomorphic curve, then rescaled with the accumulated z ratios);
+//   - with x' = x·Z^2, y' = y·Z^3 every point maps to the curve
+//     y'^2 = x'^3 + 7·Z^6; the a = 0 Jacobian formulas do not use the
+//     constant term, so the whole sum is computed on that curve, where the
+//     table entries are affine (mixed additions, 7M + 4S instead of
+//     11M + 5S, and no inversion);
+//   - the affine G multiples are added as Jacobian points (x, y, 1/Z)
+//     (jacAddZinv, one extra multiplication), and the result's Z is
+//     multiplied by Z at the end to return to secp256k1.
+func linearCombinationVartime(out *point, u1, u2 *scalar, q *point) {
+	if q.isIdentity() == 1 {
+		linearCombinationVartimeGeneric(out, u1, u2, q)
+		return
+	}
+	// Affine q (public: a variable-time inversion is fine).
+	// q is projective: x = X/Z, y = Y/Z.
+	var qa affinePoint
+	if q.z.equal(&fieldOne) == 1 {
+		qa.x, qa.y = q.x, q.y
+	} else {
+		var zinv fieldElement
+		zinv.invVartime(&q.z)
+		qa.x.mul(&q.x, &zinv)
+		qa.y.mul(&q.y, &zinv)
+	}
+	var tq, tlq [1 << (glvWindowQ - 2)]affinePoint
+	var globalZ fieldElement
+	if !coZOddMultiples(&tq, &globalZ, &qa) {
+		linearCombinationVartimeGeneric(out, u1, u2, q)
+		return
+	}
+	for i := range tq {
+		tlq[i].x.mul(&tq[i].x, &glvBeta)
+		tlq[i].y = tq[i].y
+	}
+
+	a1, a2, na1, na2 := splitScalarVartime(u1)
+	da1, ta1 := wnafVartime(&a1, glvWindowG)
+	da2, ta2 := wnafVartime(&a2, glvWindowG)
+	b1, b2, nb1, nb2 := splitScalarVartime(u2)
+	db1, tb1 := wnafVartime(&b1, glvWindowQ)
+	db2, tb2 := wnafVartime(&b2, glvWindowQ)
+	top := max(ta1, ta2, tb1, tb2)
+
+	acc := jacobian{inf: true}
+	var ap affinePoint
+	for i := top; i >= 0; i-- {
+		jacDouble(&acc, &acc)
+		if d := db1[i]; d != 0 {
+			ap = tq[absHalf(d)]
+			if (d < 0) != nb1 {
+				ap.y.neg(&ap.y)
+			}
+			jacAddAffine(&acc, &acc, &ap)
+		}
+		if d := db2[i]; d != 0 {
+			ap = tlq[absHalf(d)]
+			if (d < 0) != nb2 {
+				ap.y.neg(&ap.y)
+			}
+			jacAddAffine(&acc, &acc, &ap)
+		}
+		if d := da1[i]; d != 0 {
+			ap = glvTableG[absHalf(d)]
+			if (d < 0) != na1 {
+				ap.y.neg(&ap.y)
+			}
+			jacAddZinv(&acc, &acc, &ap, &globalZ)
+		}
+		if d := da2[i]; d != 0 {
+			ap = glvTableLG[absHalf(d)]
+			if (d < 0) != na2 {
+				ap.y.neg(&ap.y)
+			}
+			jacAddZinv(&acc, &acc, &ap, &globalZ)
+		}
+	}
+	if !acc.inf {
+		acc.z.mul(&acc.z, &globalZ)
+	}
+	jacToProjective(out, &acc)
+}
+
+// coZOddMultiples sets t[i] = (X_i, Y_i) and Z such that the Jacobian
+// points (X_i, Y_i, Z) are (2i+1)·q, for an affine q other than the
+// identity. It returns false in the exceptional cases (2q or a sum being
+// the identity or a doubling), which cannot occur for a point of the
+// prime-order group but are handled by the caller's generic fallback.
+func coZOddMultiples(t *[1 << (glvWindowQ - 2)]affinePoint, Z *fieldElement, q *affinePoint) bool {
+	// d = 2q (Jacobian, d.z = 2·y_q).
+	var d jacobian
+	jacDouble(&d, &jacobian{x: q.x, y: q.y, z: fieldOne})
+	if d.inf || d.z.isZero() == 1 {
+		return false
+	}
+	// On the isomorphic curve scaled by d.z, d is the affine point
+	// (d.x, d.y) and q is (x·dz^2, y·dz^3) with Z = 1.
+	var dz2, dz3 fieldElement
+	dz2.square(&d.z)
+	dz3.mul(&dz2, &d.z)
+	dAff := affinePoint{x: d.x, y: d.y}
+	var pts [1 << (glvWindowQ - 2)]jacobian
+	var zr [1 << (glvWindowQ - 2)]fieldElement // zr[i] = pts[i].z / pts[i-1].z
+	pts[0].x.mul(&q.x, &dz2)
+	pts[0].y.mul(&q.y, &dz3)
+	pts[0].z = fieldOne
+	for i := 1; i < len(pts); i++ {
+		if !jacAddAffineZR(&pts[i], &zr[i], &pts[i-1], &dAff) {
+			return false
+		}
+	}
+	// Rescale every point to the last point's Z: point i is multiplied by
+	// r_i = zr[i+1]·...·zr[last] (X·r^2, Y·r^3).
+	last := len(pts) - 1
+	t[last] = affinePoint{x: pts[last].x, y: pts[last].y}
+	r := zr[last]
+	for i := last - 1; i >= 0; i-- {
+		var r2, r3 fieldElement
+		r2.square(&r)
+		r3.mul(&r2, &r)
+		t[i].x.mul(&pts[i].x, &r2)
+		t[i].y.mul(&pts[i].y, &r3)
+		if i > 0 {
+			r.mul(&r, &zr[i])
+		}
+	}
+	// Back on secp256k1, the shared Z is (last Z)·dz.
+	Z.mul(&pts[last].z, &d.z)
+	return true
+}
+
+// jacAddAffineZR sets r = p + q (p Jacobian, not the identity; q affine)
+// and zr = r.z / p.z. It returns false, leaving r unspecified, if the sum
+// is a doubling or the identity (h = 0).
+func jacAddAffineZR(r *jacobian, zr *fieldElement, p *jacobian, q *affinePoint) bool {
+	var z1z1, u2, s2, h, rr fieldElement
+	z1z1.square(&p.z)
+	u2.mul(&q.x, &z1z1)
+	s2.mul(&q.y, &p.z)
+	s2.mul(&s2, &z1z1)
+	h.sub(&u2, &p.x)
+	if h.isZero() == 1 {
+		return false
+	}
+	rr.sub(&s2, &p.y)
+	rr.add(&rr, &rr)
+	var hh, i, j, v, x3, y3 fieldElement
+	hh.square(&h)
+	i.add(&hh, &hh)
+	i.add(&i, &i)
+	j.mul(&h, &i)
+	v.mul(&p.x, &i)
+	x3.square(&rr)
+	x3.sub(&x3, &j)
+	x3.sub(&x3, &v)
+	x3.sub(&x3, &v)
+	y3.sub(&v, &x3)
+	y3.mul(&y3, &rr)
+	j.mul(&j, &p.y)
+	j.add(&j, &j)
+	y3.sub(&y3, &j)
+	zr.add(&h, &h) // z3 = 2·z1·h
+	r.z.mul(&p.z, zr)
+	r.x, r.y, r.inf = x3, y3, false
+	return true
+}
+
+// jacAddZinv sets r = p + b, where b is given by affine coordinates
+// (b.x, b.y) and stands for the Jacobian point (b.x, b.y, 1/bz). With
+// az = p.z·bz, it is the mixed addition with az in place of p.z for b's
+// scaling, and z3 = 2·p.z·h (the common factor bz^3 cancels).
+func jacAddZinv(r, p *jacobian, b *affinePoint, bz *fieldElement) {
+	if p.inf {
+		// (b.x, b.y, 1/bz) ~ (b.x·bz^2, b.y·bz^3, 1).
+		var bz2, bz3 fieldElement
+		bz2.square(bz)
+		bz3.mul(&bz2, bz)
+		r.x.mul(&b.x, &bz2)
+		r.y.mul(&b.y, &bz3)
+		r.z = fieldOne
+		r.inf = false
+		return
+	}
+	var az, z1z1, u2, s2, h, rr fieldElement
+	az.mul(&p.z, bz)
+	z1z1.square(&az)
+	u2.mul(&b.x, &z1z1)
+	s2.mul(&b.y, &az)
+	s2.mul(&s2, &z1z1)
+	h.sub(&u2, &p.x)
+	rr.sub(&s2, &p.y)
+	if h.isZero() == 1 {
+		if rr.isZero() == 1 {
+			jacDouble(r, p)
+		} else {
+			r.inf = true
+		}
+		return
+	}
+	rr.add(&rr, &rr)
+	var hh, i, j, v, x3, y3, z3 fieldElement
+	hh.square(&h)
+	i.add(&hh, &hh)
+	i.add(&i, &i)
+	j.mul(&h, &i)
+	v.mul(&p.x, &i)
+	x3.square(&rr)
+	x3.sub(&x3, &j)
+	x3.sub(&x3, &v)
+	x3.sub(&x3, &v)
+	y3.sub(&v, &x3)
+	y3.mul(&y3, &rr)
+	j.mul(&j, &p.y)
+	j.add(&j, &j)
+	y3.sub(&y3, &j)
+	z3.mul(&p.z, &h)
+	z3.add(&z3, &z3)
+	r.x, r.y, r.z, r.inf = x3, y3, z3, false
 }
 
 // absHalf maps an odd digit ±(2i+1) to the table index i.

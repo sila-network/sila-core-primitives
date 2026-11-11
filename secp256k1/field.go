@@ -90,15 +90,13 @@ func (z *fieldElement) neg(x *fieldElement) *fieldElement {
 
 // mul sets z = x·y mod p.
 func (z *fieldElement) mul(x, y *fieldElement) *fieldElement {
-	t0, t1, t2, t3, t4, t5, t6, t7 := mulWords(&x.v, &y.v)
-	reduceWords(&z.v, t0, t1, t2, t3, t4, t5, t6, t7)
+	fieldMul(&z.v, &x.v, &y.v)
 	return z
 }
 
 // square sets z = x^2 mod p.
 func (z *fieldElement) square(x *fieldElement) *fieldElement {
-	t0, t1, t2, t3, t4, t5, t6, t7 := sqrWords(&x.v)
-	reduceWords(&z.v, t0, t1, t2, t3, t4, t5, t6, t7)
+	fieldSqr(&z.v, &x.v)
 	return z
 }
 

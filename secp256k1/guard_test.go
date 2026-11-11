@@ -145,23 +145,29 @@ func FuzzSignVerifyRecover(f *testing.F) {
 	})
 }
 
-// Functions defined in vartime.go (variable-time, public inputs only) may
+// Functions defined in vartime*.go (variable-time, public inputs only) may
 // be called only from the public-input entry points Verify and
 // RecoverPublicKey, and from each other. This static check stops a future
 // change from routing a secret (a private key or a nonce) through them.
 func TestVariableTimeHelpersOnlyOnPublicPaths(t *testing.T) {
 	fset := token.NewFileSet()
-	vf, err := parser.ParseFile(fset, "vartime.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	vfiles, _ := filepath.Glob("vartime*.go")
 	vartime := map[string]bool{}
-	for _, decl := range vf.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok {
-			vartime[fn.Name.Name] = true
+	for _, vfile := range vfiles {
+		if strings.HasSuffix(vfile, "_test.go") {
+			continue
+		}
+		vf, err := parser.ParseFile(fset, vfile, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range vf.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				vartime[fn.Name.Name] = true
+			}
 		}
 	}
-	for _, name := range []string{"linearCombinationVartime", "wnafVartime", "splitScalarVartime", "jacAdd", "jacAddAffine", "jacDouble"} {
+	for _, name := range []string{"linearCombinationVartime", "wnafVartime", "splitScalarVartime", "jacAdd", "jacAddAffine", "jacDouble", "invVartime", "modInverseVartime", "publicKeyFromPointVartime"} {
 		if !vartime[name] {
 			t.Fatalf("%s is not defined in vartime.go", name)
 		}
@@ -170,7 +176,7 @@ func TestVariableTimeHelpersOnlyOnPublicPaths(t *testing.T) {
 	files, _ := filepath.Glob("*.go")
 	calls := 0
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") || f == "vartime.go" {
+		if strings.HasSuffix(f, "_test.go") || strings.HasPrefix(f, "vartime") {
 			continue
 		}
 		af, err := parser.ParseFile(fset, f, nil, 0)

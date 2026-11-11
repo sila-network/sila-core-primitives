@@ -341,7 +341,7 @@ func Verify(pub PublicKey, digest [DigestSize]byte, sig Signature) bool {
 	}
 	var z, w, u1, u2 scalar
 	z.setBytesReduced(&digest)
-	w.inv(&s)
+	w.invVartime(&s) // s is public
 	u1.mul(&z, &w)
 	u2.mul(&r, &w)
 
@@ -408,13 +408,13 @@ func RecoverPublicKey(digest [DigestSize]byte, sig Signature) (PublicKey, error)
 	// Q = r^-1 (s·R - z·G) = (-z·r^-1)·G + (s·r^-1)·R.
 	var z, rinv, u1, u2 scalar
 	z.setBytesReduced(&digest)
-	rinv.inv(&r)
+	rinv.invVartime(&r) // r is public
 	u1.mul(&z, &rinv)
 	u1.neg(&u1)
 	u2.mul(&s, &rinv)
 	var Q point
 	linearCombinationVartime(&Q, &u1, &u2, &R)
-	return publicKeyFromPoint(&Q)
+	return publicKeyFromPointVartime(&Q)
 }
 
 // rfc6979 generates nonce candidates per RFC 6979 §3.2 with HMAC-SHA-256

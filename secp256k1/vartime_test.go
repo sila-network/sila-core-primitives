@@ -223,3 +223,47 @@ func TestWNAFWidthLimits(t *testing.T) {
 		}()
 	}
 }
+
+// The effective-affine combination agrees with the generic one (general
+// Jacobian additions for q) on random and adversarial inputs, and its
+// co-Z table holds the odd multiples of q.
+func TestLinearCombinationEffectiveAffine(t *testing.T) {
+	rng := rand.New(rand.NewSource(73))
+	ks := interesting(rng, bigN, 600)
+	for i := 0; i+2 < len(ks); i += 3 {
+		u1, u2, m := scalarFromBig(ks[i]), scalarFromBig(ks[i+1]), scalarFromBig(ks[i+2])
+		var q point
+		q.scalarBaseMult(&m)
+		var got, want point
+		linearCombinationVartime(&got, &u1, &u2, &q)
+		linearCombinationVartimeGeneric(&want, &u1, &u2, &q)
+		if got.equal(&want) != 1 {
+			t.Fatalf("effective affine differs from generic at %d", i)
+		}
+		if q.isIdentity() == 1 {
+			continue
+		}
+		x, y, _ := q.affine()
+		var tbl [1 << (glvWindowQ - 2)]affinePoint
+		var Z fieldElement
+		if !coZOddMultiples(&tbl, &Z, &affinePoint{x: x, y: y}) {
+			t.Fatalf("co-Z table failed at %d", i)
+		}
+		var mul point
+		for j := range tbl {
+			var k scalar
+			k.setLimbsVartime(&limbs{uint64(2*j + 1)})
+			mul.scalarMult(&k, &q)
+			var z2, z3, ex, ey fieldElement
+			z2.square(&Z)
+			z3.mul(&z2, &Z)
+			// Jacobian (X, Y, Z) is affine (X/Z^2, Y/Z^3).
+			mx, my, _ := mul.affine()
+			ex.mul(&mx, &z2)
+			ey.mul(&my, &z3)
+			if ex.equal(&tbl[j].x) != 1 || ey.equal(&tbl[j].y) != 1 {
+				t.Fatalf("co-Z table entry %d wrong at %d", j, i)
+			}
+		}
+	}
+}

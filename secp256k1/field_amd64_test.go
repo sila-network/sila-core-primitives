@@ -1,0 +1,86 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ahmed Ibrahim
+
+//go:build amd64 && !purego
+
+package secp256k1
+
+import (
+	"crypto/rand"
+	"testing"
+)
+
+// TestFieldAsmMatchesGo checks both assembly implementations (MULX/ADX,
+// when the CPU has it, and the portable MULQ code) against the portable Go
+// arithmetic (mulWords/sqrWords + reduceWords, itself checked against
+// math/big in arith_test.go): random values, values next to p and to the
+// word boundaries, and aliasing of the output with the inputs.
+func TestFieldAsmMatchesGo(t *testing.T) {
+	t.Logf("useADX = %v", useADX)
+	pm1 := limbs{fieldP.m[0] - 1, fieldP.m[1], fieldP.m[2], fieldP.m[3]}
+	edges := []limbs{
+		{}, {1}, {2}, pm1,
+		{fieldP.m[0] - 2, fieldP.m[1], fieldP.m[2], fieldP.m[3]},
+		{^uint64(0), 0, 0, 0},
+		{0, ^uint64(0), 0, 0},
+		{0, 0, 0, 1 << 63},
+		{^uint64(0), ^uint64(0), ^uint64(0), 0},
+		{0xFFFFFFFEFFFFFC2E, 0, 0, 0}, // p0 - 1 in the low word
+		{0x1000003D1, 0, 0, 0},
+	}
+	vals := append([]limbs{}, edges...)
+	var b [32]byte
+	for len(vals) < 20000 {
+		if _, err := rand.Read(b[:]); err != nil {
+			t.Fatal(err)
+		}
+		var f fieldElement
+		if f.setBytes(&b) == 1 {
+			vals = append(vals, f.v)
+		}
+	}
+	goMul := func(x, y *limbs) limbs {
+		var z limbs
+		t0, t1, t2, t3, t4, t5, t6, t7 := mulWords(x, y)
+		reduceWords(&z, t0, t1, t2, t3, t4, t5, t6, t7)
+		return z
+	}
+	type impl struct {
+		name string
+		mul  func(z, x, y *limbs)
+		sqr  func(z, x *limbs)
+	}
+	impls := []impl{{"MULQ", fieldMulMULQ, fieldSqrMULQ}, {"dispatch", fieldMul, fieldSqr}}
+	if useADX {
+		impls = append(impls, impl{"ADX", fieldMulADX, fieldSqrADX})
+	}
+	for _, im := range impls {
+		for i := range vals {
+			x := vals[i]
+			y := vals[(i*7919+1)%len(vals)]
+			want := goMul(&x, &y)
+			var z limbs
+			im.mul(&z, &x, &y)
+			if z != want {
+				t.Fatalf("%s mul(%x, %x) = %x, want %x", im.name, x, y, z, want)
+			}
+			wantSq := goMul(&x, &x)
+			im.sqr(&z, &x)
+			if z != wantSq {
+				t.Fatalf("%s sqr(%x) = %x, want %x", im.name, x, z, wantSq)
+			}
+			// Aliasing: z = x, z = y, z = x = y.
+			a := x
+			im.mul(&a, &a, &y)
+			c := y
+			im.mul(&c, &x, &c)
+			d := x
+			im.sqr(&d, &d)
+			e := x
+			im.mul(&e, &e, &e)
+			if a != want || c != want || d != wantSq || e != wantSq {
+				t.Fatalf("%s: aliasing changes the result for %x, %x", im.name, x, y)
+			}
+		}
+	}
+}

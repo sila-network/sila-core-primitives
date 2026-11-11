@@ -425,3 +425,44 @@ func TestWNAFMatchesReference(t *testing.T) {
 		}
 	}
 }
+
+// splitScalarReference is the decomposition computed modulo n (four
+// Montgomery products), kept as the reference for splitScalarVartime.
+func splitScalarReference(k *scalar) (k1, k2 limbs, neg1, neg2 bool) {
+	kc := k.canonical()
+	c1 := mulShift384(&kc, &glvG1)
+	c2 := mulShift384(&kc, &glvG2)
+	var s1, s2, t, r1, r2 scalar
+	s1.setLimbsVartime(&c1)
+	s2.setLimbsVartime(&c2)
+	r2.mul(&s1, &glvNegB1)
+	t.mul(&s2, &glvNegB2)
+	r2.add(&r2, &t)
+	r1.mul(&s1, &glvA1)
+	t.mul(&s2, &glvA2)
+	r1.add(&r1, &t)
+	r1.sub(k, &r1)
+	k1, neg1 = signedHalf(&r1)
+	k2, neg2 = signedHalf(&r2)
+	return
+}
+
+// TestSplitScalarMatchesReference checks the integer (mod 2^192) split
+// against the modular reference on edge and random scalars, including
+// k = 0, 1, n - 1, λ, values next to 2^128 and 2^255.
+func TestSplitScalarMatchesReference(t *testing.T) {
+	rng := rand.New(rand.NewSource(72))
+	ks := interesting(rng, bigN, 20000)
+	ks = append(ks, big.NewInt(0), big.NewInt(1), new(big.Int).Sub(bigN, big.NewInt(1)),
+		bigLambda, new(big.Int).Sub(bigN, bigLambda),
+		new(big.Int).Lsh(big.NewInt(1), 128), new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1)),
+		new(big.Int).Lsh(big.NewInt(1), 255))
+	for _, k := range ks {
+		s := scalarFromBig(k)
+		a1, a2, an1, an2 := splitScalarVartime(&s)
+		b1, b2, bn1, bn2 := splitScalarReference(&s)
+		if a1 != b1 || a2 != b2 || an1 != bn1 || an2 != bn2 {
+			t.Fatalf("split of %x: got (%x, %x, %v, %v), want (%x, %x, %v, %v)", k, a1, a2, an1, an2, b1, b2, bn1, bn2)
+		}
+	}
+}

@@ -292,6 +292,10 @@ var (
 	glvNegB1 = mustScalar("e4437ed6010e88286f547fa90abfe4c3")
 	glvA2    = mustScalar("114ca50f7a8e2f3f657c1108d9d44cfd8")
 	glvNegB2 = func() scalar { var s scalar; s.neg(&glvA1); return s }()
+	// The same basis as plain integers (low 192 bits) for the split.
+	glvA1Int    = [3]uint64{0xe86c90e49284eb15, 0x3086d221a7d46bcd, 0}
+	glvNegB1Int = [3]uint64{0x6f547fa90abfe4c3, 0xe4437ed6010e8828, 0}
+	glvA2Int    = [3]uint64{0x57c1108d9d44cfd8, 0x14ca50f7a8e2f3f6, 0x1}
 	// g1 = round(2^384·b2/n), g2 = round(2^384·(-b1)/n).
 	glvG1 = mustLimbs("3086d221a7d46bcde86c90e49284eb153daa8a1471e8ca7fe893209a45dbb031")
 	glvG2 = mustLimbs("e4437ed6010e88286f547fa90abfe4c4221208ac9df506c61571b4ae8ac47f71")
@@ -308,25 +312,70 @@ func mulShift384(k, g *limbs) limbs {
 
 // splitScalarVartime returns k1, k2 with k ≡ ±k1 ± k2·λ (mod n), as
 // non-negative values below 2^128 and their signs (true = negative).
+//
+// With c1 = round(k·g1/2^384), c2 = round(k·g2/2^384) the decomposition
+// is the exact integer identity
+//
+//	k1 = k - c1·a1 - c2·a2,  k2 = -c1·b1 - c2·b2 = c1·(-b1) - c2·a1,
+//
+// (k1 + k2·λ ≡ k because a + b·λ ≡ 0 mod n for both basis vectors), with
+// |k1|, |k2| < 2^128. It is therefore computed with plain two's-complement
+// arithmetic modulo 2^192, without reductions modulo n or Montgomery
+// conversions.
 func splitScalarVartime(k *scalar) (k1, k2 limbs, neg1, neg2 bool) {
 	kc := k.canonical()
 	c1 := mulShift384(&kc, &glvG1)
 	c2 := mulShift384(&kc, &glvG2)
-	var s1, s2, t scalar
-	s1.setLimbsVartime(&c1)
-	s2.setLimbsVartime(&c2)
-	// k2 = -c1·b1 - c2·b2; k1 = k - k2·λ is computed as k - c1·a1 - c2·a2.
-	var r1, r2 scalar
-	r2.mul(&s1, &glvNegB1)
-	t.mul(&s2, &glvNegB2)
-	r2.add(&r2, &t)
-	r1.mul(&s1, &glvA1)
-	t.mul(&s2, &glvA2)
-	r1.add(&r1, &t)
-	r1.sub(k, &r1)
-	k1, neg1 = signedHalf(&r1)
-	k2, neg2 = signedHalf(&r2)
+	// k1 = k - c1·a1 - c2·a2 (mod 2^192).
+	p := mulLow192(&c1, &glvA1Int)
+	q := mulLow192(&c2, &glvA2Int)
+	var r [3]uint64
+	var b uint64
+	r[0], b = bits.Sub64(kc[0], p[0], 0)
+	r[1], b = bits.Sub64(kc[1], p[1], b)
+	r[2], _ = bits.Sub64(kc[2], p[2], b)
+	r[0], b = bits.Sub64(r[0], q[0], 0)
+	r[1], b = bits.Sub64(r[1], q[1], b)
+	r[2], _ = bits.Sub64(r[2], q[2], b)
+	k1, neg1 = absLow192(&r)
+	// k2 = c1·(-b1) - c2·a1 (mod 2^192).
+	p = mulLow192(&c1, &glvNegB1Int)
+	q = mulLow192(&c2, &glvA1Int)
+	r[0], b = bits.Sub64(p[0], q[0], 0)
+	r[1], b = bits.Sub64(p[1], q[1], b)
+	r[2], _ = bits.Sub64(p[2], q[2], b)
+	k2, neg2 = absLow192(&r)
 	return
+}
+
+// mulLow192 returns c·a mod 2^192 for c < 2^128 (c[2], c[3] are 0) and
+// a < 2^192.
+func mulLow192(c *limbs, a *[3]uint64) [3]uint64 {
+	h00, l00 := bits.Mul64(c[0], a[0])
+	h01, l01 := bits.Mul64(c[0], a[1])
+	h10, l10 := bits.Mul64(c[1], a[0])
+	var r [3]uint64
+	var x uint64
+	r[0] = l00
+	r[1], x = bits.Add64(h00, l01, 0)
+	r[2] = h01 + x + c[0]*a[2] + c[1]*a[1]
+	r[1], x = bits.Add64(r[1], l10, 0)
+	r[2] += h10 + x
+	return r
+}
+
+// absLow192 interprets r as a 192-bit two's-complement integer and returns
+// its absolute value and whether it is negative.
+func absLow192(r *[3]uint64) (limbs, bool) {
+	if int64(r[2]) >= 0 {
+		return limbs{r[0], r[1], r[2], 0}, false
+	}
+	var b uint64
+	var a limbs
+	a[0], b = bits.Sub64(0, r[0], 0)
+	a[1], b = bits.Sub64(0, r[1], b)
+	a[2], _ = bits.Sub64(0, r[2], b)
+	return a, true
 }
 
 // signedHalf returns |s| as the smaller of s and n - s, and whether n - s

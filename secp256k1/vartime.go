@@ -25,7 +25,10 @@ package secp256k1
 // The constants below are mathematical facts about the curve; tests check
 // each one against math/big (arith_test.go, vartime_test.go).
 
-import "math/bits"
+import (
+	"math/bits"
+	"sync/atomic"
+)
 
 type jacobian struct {
 	x, y, z fieldElement
@@ -217,9 +220,9 @@ func jacToProjective(out *point, p *jacobian) {
 // first): digits are 0 or odd in (-2^(w-1), 2^(w-1)), non-zero digits are
 // at least w positions apart. top is the index of the highest non-zero
 // digit, or -1 for k = 0.
-func wnafVartime(k *limbs, w uint) (digits [257]int8, top int) {
-	if w < 2 || w > 8 {
-		// Digits are int8: |d| < 2^(w-1) must fit.
+func wnafVartime(k *limbs, w uint) (digits [257]int16, top int) {
+	if w < 2 || w > 15 {
+		// Digits are int16: |d| < 2^(w-1) must fit.
 		panic("sila/secp256k1: unsupported wNAF width")
 	}
 	x := [5]uint64{k[0], k[1], k[2], k[3], 0}
@@ -232,7 +235,7 @@ func wnafVartime(k *limbs, w uint) (digits [257]int8, top int) {
 			if d >= half {
 				d -= int64(1) << w
 			}
-			digits[i] = int8(d)
+			digits[i] = int16(d)
 			top = i
 			if d > 0 {
 				var b uint64
@@ -317,28 +320,43 @@ func signedHalf(s *scalar) (limbs, bool) {
 }
 
 const (
-	glvWindowG = 8 // odd multiples 1..255 of G and λG (8 is the int8 digit limit)
+	// odd multiples 1..2^glvWindowG - 1 of G and λG (2·2^(w-2) affine
+	// points, 128 KiB for w = 12), built on first use.
+	glvWindowG = 12
 	glvWindowQ = 5 // odd multiples 1..15 of the variable point
 )
 
-// glvTableG[i] = (2i+1)·G and glvTableLG[i] = (2i+1)·λG, affine.
-var glvTableG, glvTableLG = func() (*[1 << (glvWindowG - 2)]affinePoint, *[1 << (glvWindowG - 2)]affinePoint) {
+// glvTables holds glvTables().g[i] = (2i+1)·G and lg[i] = (2i+1)·λG,
+// affine. They are public constants, computed on first use (not at
+// program start, to keep start-up cheap) and shared; concurrent first
+// calls may both compute them, and one result is kept.
+type glvGTables struct {
+	g, lg [1 << (glvWindowG - 2)]affinePoint
+}
+
+var glvTablesG atomic.Pointer[glvGTables]
+
+func glvTables() *glvGTables {
+	if t := glvTablesG.Load(); t != nil {
+		return t
+	}
 	const size = 1 << (glvWindowG - 2)
-	var proj [size]point
+	t := new(glvGTables)
+	proj := make([]point, size)
 	var g2 point
 	proj[0] = generator
 	g2.double(&generator)
 	for i := 1; i < size; i++ {
 		proj[i].add(&proj[i-1], &g2)
 	}
-	var t, lt [size]affinePoint
-	batchAffine(t[:], proj[:])
-	for i := range t {
-		lt[i].x.mul(&t[i].x, &glvBeta)
-		lt[i].y = t[i].y
+	batchAffine(t.g[:], proj)
+	for i := range t.g {
+		t.lg[i].x.mul(&t.g[i].x, &glvBeta)
+		t.lg[i].y = t.g[i].y
 	}
-	return &t, &lt
-}()
+	glvTablesG.CompareAndSwap(nil, t)
+	return glvTablesG.Load()
+}
 
 // linearCombinationVartimeGeneric sets out = u1·G + u2·q for PUBLIC u1, u2
 // and q (any point, including the identity), with general Jacobian
@@ -346,13 +364,14 @@ var glvTableG, glvTableLG = func() (*[1 << (glvWindowG - 2)]affinePoint, *[1 << 
 // linearCombinationVartime for the exceptional table cases and the
 // reference it is tested against.
 func linearCombinationVartimeGeneric(out *point, u1, u2 *scalar, q *point) {
+	tg := glvTables()
 	a1, a2, na1, na2 := splitScalarVartime(u1)
 	da1, ta1 := wnafVartime(&a1, glvWindowG)
 	da2, ta2 := wnafVartime(&a2, glvWindowG)
 	top := max(ta1, ta2)
 
 	var oddQ, oddLQ [1 << (glvWindowQ - 2)]jacobian
-	var db1, db2 [257]int8
+	var db1, db2 [257]int16
 	var nb1, nb2 bool
 	if q.isIdentity() == 0 {
 		// Affine q (public: a variable-time inversion is fine).
@@ -389,14 +408,14 @@ func linearCombinationVartimeGeneric(out *point, u1, u2 *scalar, q *point) {
 	for i := top; i >= 0; i-- {
 		jacDouble(&acc, &acc)
 		if d := da1[i]; d != 0 {
-			ap = glvTableG[absHalf(d)]
+			ap = tg.g[absHalf(d)]
 			if (d < 0) != na1 {
 				ap.y.neg(&ap.y)
 			}
 			jacAddAffine(&acc, &acc, &ap)
 		}
 		if d := da2[i]; d != 0 {
-			ap = glvTableLG[absHalf(d)]
+			ap = tg.lg[absHalf(d)]
 			if (d < 0) != na2 {
 				ap.y.neg(&ap.y)
 			}
@@ -476,6 +495,7 @@ func linearCombinationVartime(out *point, u1, u2 *scalar, q *point) {
 		tlq[i].y = tq[i].y
 	}
 
+	tg := glvTables()
 	a1, a2, na1, na2 := splitScalarVartime(u1)
 	da1, ta1 := wnafVartime(&a1, glvWindowG)
 	da2, ta2 := wnafVartime(&a2, glvWindowG)
@@ -503,14 +523,14 @@ func linearCombinationVartime(out *point, u1, u2 *scalar, q *point) {
 			jacAddAffine(&acc, &acc, &ap)
 		}
 		if d := da1[i]; d != 0 {
-			ap = glvTableG[absHalf(d)]
+			ap = tg.g[absHalf(d)]
 			if (d < 0) != na1 {
 				ap.y.neg(&ap.y)
 			}
 			jacAddZinv(&acc, &acc, &ap, &globalZ)
 		}
 		if d := da2[i]; d != 0 {
-			ap = glvTableLG[absHalf(d)]
+			ap = tg.lg[absHalf(d)]
 			if (d < 0) != na2 {
 				ap.y.neg(&ap.y)
 			}
@@ -661,7 +681,7 @@ func jacAddZinv(r, p *jacobian, b *affinePoint, bz *fieldElement) {
 }
 
 // absHalf maps an odd digit ±(2i+1) to the table index i.
-func absHalf(d int8) int {
+func absHalf(d int16) int {
 	if d < 0 {
 		d = -d
 	}

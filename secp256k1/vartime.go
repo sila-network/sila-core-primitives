@@ -226,39 +226,54 @@ func wnafVartime(k *limbs, w uint) (digits [257]int16, top int) {
 		// Digits are int16: |d| < 2^(w-1) must fit.
 		panic("sila/secp256k1: unsupported wNAF width")
 	}
-	x := [5]uint64{k[0], k[1], k[2], k[3], 0}
+	x0, x1, x2, x3, x4 := k[0], k[1], k[2], k[3], uint64(0)
 	mask := uint64(1)<<w - 1
 	half := int64(1) << (w - 1)
 	top = -1
-	for i := 0; i < 257 && (x[0]|x[1]|x[2]|x[3]|x[4]) != 0; i++ {
-		if x[0]&1 == 1 {
-			d := int64(x[0] & mask)
-			if d >= half {
-				d -= int64(1) << w
+	// shr shifts x right by 0 < s < 64 bits.
+	shr := func(s uint) {
+		x0 = x0>>s | x1<<(64-s)
+		x1 = x1>>s | x2<<(64-s)
+		x2 = x2>>s | x3<<(64-s)
+		x3 = x3>>s | x4<<(64-s)
+		x4 >>= s
+	}
+	i := 0
+	for i < 257 && (x0|x1|x2|x3|x4) != 0 {
+		if x0&1 == 0 {
+			// A run of zero digits: skip it at once (up to 63 bits).
+			s := uint(bits.TrailingZeros64(x0))
+			if s == 64 {
+				s = 63
 			}
-			digits[i] = int16(d)
-			top = i
-			if d > 0 {
-				var b uint64
-				x[0], b = bits.Sub64(x[0], uint64(d), 0)
-				x[1], b = bits.Sub64(x[1], 0, b)
-				x[2], b = bits.Sub64(x[2], 0, b)
-				x[3], b = bits.Sub64(x[3], 0, b)
-				x[4], _ = bits.Sub64(x[4], 0, b)
-			} else {
-				var c uint64
-				x[0], c = bits.Add64(x[0], uint64(-d), 0)
-				x[1], c = bits.Add64(x[1], 0, c)
-				x[2], c = bits.Add64(x[2], 0, c)
-				x[3], c = bits.Add64(x[3], 0, c)
-				x[4], _ = bits.Add64(x[4], 0, c)
-			}
+			shr(s)
+			i += int(s)
+			continue
 		}
-		x[0] = x[0]>>1 | x[1]<<63
-		x[1] = x[1]>>1 | x[2]<<63
-		x[2] = x[2]>>1 | x[3]<<63
-		x[3] = x[3]>>1 | x[4]<<63
-		x[4] >>= 1
+		d := int64(x0 & mask)
+		if d >= half {
+			d -= int64(1) << w
+		}
+		digits[i] = int16(d)
+		top = i
+		if d > 0 {
+			var b uint64
+			x0, b = bits.Sub64(x0, uint64(d), 0)
+			x1, b = bits.Sub64(x1, 0, b)
+			x2, b = bits.Sub64(x2, 0, b)
+			x3, b = bits.Sub64(x3, 0, b)
+			x4, _ = bits.Sub64(x4, 0, b)
+		} else {
+			var c uint64
+			x0, c = bits.Add64(x0, uint64(-d), 0)
+			x1, c = bits.Add64(x1, 0, c)
+			x2, c = bits.Add64(x2, 0, c)
+			x3, c = bits.Add64(x3, 0, c)
+			x4, _ = bits.Add64(x4, 0, c)
+		}
+		// The low w bits are now zero: the next w - 1 digits are 0.
+		shr(w)
+		i += int(w)
 	}
 	return digits, top
 }

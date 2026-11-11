@@ -362,3 +362,66 @@ func TestFusedVartimeHelpers(t *testing.T) {
 		}
 	}
 }
+
+// wnafReference is the straightforward bit-by-bit width-w NAF (one digit
+// per iteration), kept as the reference for wnafVartime.
+func wnafReference(k *limbs, w uint) (digits [257]int16, top int) {
+	x := new(big.Int).Set(limbsToBig(*k))
+	mod := new(big.Int).Lsh(big.NewInt(1), w)
+	half := int64(1) << (w - 1)
+	top = -1
+	for i := 0; x.Sign() != 0; i++ {
+		if x.Bit(0) == 1 {
+			d := new(big.Int).Mod(x, mod).Int64()
+			if d >= half {
+				d -= int64(1) << w
+			}
+			digits[i] = int16(d)
+			top = i
+			x.Sub(x, big.NewInt(d))
+		}
+		x.Rsh(x, 1)
+	}
+	return digits, top
+}
+
+// TestWNAFMatchesReference compares wnafVartime (which skips runs of zero
+// digits) with the bit-by-bit reference: every width, edge values, sparse
+// values with long zero runs (including whole zero words) and random
+// 129- and 256-bit values.
+func TestWNAFMatchesReference(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	vals := []limbs{
+		{}, {1}, {2}, {3}, {^uint64(0)}, {0, 1}, {0, 0, 1}, {0, 0, 0, 1},
+		{0, 0, 0, 1 << 63}, {^uint64(0), ^uint64(0), ^uint64(0), ^uint64(0)},
+		{1, 0, 0, 1 << 63}, {1 << 63, 0, 0, 0}, {0, 1 << 63, 0, 1},
+		scalarN.m, {scalarN.m[0] - 1, scalarN.m[1], scalarN.m[2], scalarN.m[3]},
+	}
+	for i := 0; i < 256; i += 3 {
+		var l limbs
+		l[i/64] |= 1 << (i % 64)
+		vals = append(vals, l)
+		l[(255-i)/64] |= 1 << ((255 - i) % 64)
+		vals = append(vals, l)
+	}
+	for len(vals) < 2000 {
+		l := limbs{rng.Uint64(), rng.Uint64(), rng.Uint64(), rng.Uint64()}
+		switch len(vals) % 3 {
+		case 0:
+			l[2] &= 1 // 129-bit, as after the GLV split
+			l[3] = 0
+		case 1:
+			l[1] = 0 // a whole zero word
+		}
+		vals = append(vals, l)
+	}
+	for w := uint(2); w <= 15; w++ {
+		for _, k := range vals {
+			got, gtop := wnafVartime(&k, w)
+			want, wtop := wnafReference(&k, w)
+			if got != want || gtop != wtop {
+				t.Fatalf("width %d, k = %x: digits or top differ (%d vs %d)", w, k, gtop, wtop)
+			}
+		}
+	}
+}

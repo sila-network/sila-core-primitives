@@ -45,17 +45,22 @@ func jacDouble(r, p *jacobian) {
 	// is the same Jacobian point), written with as few field additions
 	// as possible:
 	//   L = X^2/2 + X^2 = (3/2)·X^2, S = Y^2, T = X·S,
-	//   X3 = L^2 - 2T, Y3 = L·(T - X3) - S^2, Z3 = Y·Z.
-	var l, s, t, u fieldElement
+	//   X3 = L^2 - 2T, Y3 = L·(T - X3) - S^2, Z3 = Y·Z,
+	// with T - X3 computed as 3T - L^2: 3T is formed while L^2 is being
+	// computed (T is ready first), which takes one subtraction off the
+	// dependency chain from one doubling to the next.
+	var l, s, t, t3, u fieldElement
 	s.square(&p.y)
 	l.square(&p.x)
 	threeHalvesVartime(&l, &l)
 	t.mul(&p.x, &s)
 	r.z.mul(&p.y, &p.z)
-	var x3 fieldElement
-	x3.square(&l)
-	subTwiceVartime(&x3, &x3, &t)
-	u.sub(&t, &x3)
+	addVartime(&t3, &t, &t)
+	addVartime(&t3, &t3, &t)
+	var x3, l2 fieldElement
+	l2.square(&l)
+	subTwiceVartime(&x3, &l2, &t)
+	u.sub(&t3, &l2)
 	u.mul(&u, &l)
 	s.square(&s)
 	r.y.sub(&u, &s)

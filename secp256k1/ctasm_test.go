@@ -4,11 +4,13 @@
 package secp256k1
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -108,50 +110,154 @@ func TestCompiledLoopsAreCounterBound(t *testing.T) {
 }
 
 // TestCompiledInversionLoopsAreCounters checks the constant-time divstep
-// inversion strictly: apart from the prologue stack check, every
-// conditional branch must directly follow a comparison of a register with
-// an immediate (a loop counter against 62, 12 or a small array length),
-// never a test of data.
+// inversion strictly. Apart from the prologue stack check, each function
+// may contain only the listed loop branches, each of the exact form
+//
+//	INCQ R          (inside the loop body)
+//	CMPQ R, $N      (N from the function's list, each used once)
+//	JL   back       (a backward jump: the loop's back edge)
+//
+// so a comparison of data with an immediate (for example a test of delta)
+// is rejected: it adds a branch, uses another constant, or is not a
+// counter back edge. A negative control function with such a data test
+// must fail the check.
 func TestCompiledInversionLoopsAreCounters(t *testing.T) {
+	// Reference the negative control so it is linked into the binary.
+	if ctCounterNegativeControl(uint64(len(t.Name()))) == 1 {
+		t.Log("negative control linked")
+	}
 	bin := ctTestBinary(t)
 	if arch := os.Getenv("SILA_CT_GOARCH"); arch != "" && arch != "amd64" {
-		t.Skip("the counter-comparison pattern is checked on amd64")
+		t.Skip("the counter-loop pattern is checked on amd64")
 	}
 	if runtime.GOARCH != "amd64" && os.Getenv("SILA_CT_GOARCH") == "" {
-		t.Skip("the counter-comparison pattern is checked on amd64")
+		t.Skip("the counter-loop pattern is checked on amd64")
 	}
-	counterCmp := regexp.MustCompile(`\sCMP[QL] [A-Z0-9]+, \$0x[0-9a-f]+\s*$`)
-	for _, pat := range []string{
-		`secp256k1\.divsteps62`,
-		`secp256k1\.modInverseCT`,
-		`secp256k1\.\(\*scalar\)\.inv`,
+	// Negative control: a 62-step loop with one data-dependent test.
+	ctl := objdump(t, bin, `secp256k1\.ctCounterNegativeControl$`)
+	if len(ctl) != 1 {
+		t.Fatal("negative control not found")
+	}
+	for name, body := range ctl {
+		if err := counterLoopsOnly(body, []uint64{62}); err == nil {
+			t.Fatalf("%s: the check accepted a data-dependent branch", name)
+		}
+	}
+	for pat, want := range map[string][]uint64{
+		`secp256k1\.divsteps62`:        {62},
+		`secp256k1\.modInverseCT`:      {12, 5},
+		`secp256k1\.\(\*scalar\)\.inv`: nil,
 	} {
 		funcs := objdump(t, bin, pat+`$`)
 		if len(funcs) == 0 {
 			t.Fatalf("no function matches %s", pat)
 		}
 		for name, body := range funcs {
-			hasStackCheck := morestack.MatchString(body)
-			prev, idx, n := "", 0, 0
-			for _, l := range strings.Split(body, "\n") {
-				if !instr.MatchString(l) {
-					continue
-				}
-				idx++
-				if condBranch.MatchString(l) {
-					n++
-					if hasStackCheck && idx <= 8 {
-						hasStackCheck = false
-					} else if !counterCmp.MatchString(prev) {
-						t.Errorf("%s: branch not on a counter:\n%s\n%s", name, prev, l)
-					}
-				}
-				prev = strings.TrimRight(l, " \t")
+			if err := counterLoopsOnly(body, want); err != nil {
+				t.Errorf("%s: %v\n%s", name, err, body)
+			} else {
+				t.Logf("%s: only the counter loops %v and the stack check", name, want)
 			}
-			t.Logf("%s: %d conditional branch(es), all on counters or the stack check", name, n)
 		}
 	}
 }
+
+// counterLoopsOnly returns nil if, apart from the prologue stack check,
+// the conditional branches of an amd64 disassembly are exactly counter
+// back edges INCQ R; CMPQ R, $N; JL <lower address>, one for each N in
+// want.
+func counterLoopsOnly(body string, want []uint64) error {
+	cmpRe := regexp.MustCompile(`\sCMPQ ([A-Z0-9]+), \$0x([0-9a-f]+)\s*$`)
+	jlRe := regexp.MustCompile(`\sJL 0x([0-9a-f]+)\s*$`)
+	addrRe := regexp.MustCompile(`^\s*\S+:\d+\s+0x([0-9a-f]+)\s`)
+	remaining := map[uint64]int{}
+	for _, n := range want {
+		remaining[n]++
+	}
+	hasStackCheck := morestack.MatchString(body)
+	var lines []string
+	for _, l := range strings.Split(body, "\n") {
+		if instr.MatchString(l) {
+			lines = append(lines, strings.TrimRight(l, " \t"))
+		}
+	}
+	for i, l := range lines {
+		if !condBranch.MatchString(l) {
+			continue
+		}
+		if hasStackCheck && i < 8 {
+			hasStackCheck = false
+			continue
+		}
+		jm := jlRe.FindStringSubmatch(l)
+		if jm == nil || i == 0 {
+			return fmt.Errorf("branch is not a JL back edge: %s", l)
+		}
+		target, _ := strconv.ParseUint(jm[1], 16, 64)
+		am := addrRe.FindStringSubmatch(l)
+		if am == nil {
+			return fmt.Errorf("cannot read address: %s", l)
+		}
+		here, _ := strconv.ParseUint(am[1], 16, 64)
+		if target >= here {
+			return fmt.Errorf("JL does not jump backwards: %s", l)
+		}
+		cm := cmpRe.FindStringSubmatch(lines[i-1])
+		if cm == nil {
+			return fmt.Errorf("branch does not follow a counter comparison: %s / %s", lines[i-1], l)
+		}
+		reg := cm[1]
+		n, _ := strconv.ParseUint(cm[2], 16, 64)
+		if remaining[n] == 0 {
+			return fmt.Errorf("unexpected loop bound %d: %s", n, lines[i-1])
+		}
+		remaining[n]--
+		// The counter must be incremented inside the loop body, i.e.
+		// between the jump target and the comparison.
+		inc := false
+		for j := 0; j < i-1; j++ {
+			m := addrRe.FindStringSubmatch(lines[j])
+			if m == nil {
+				continue
+			}
+			a, _ := strconv.ParseUint(m[1], 16, 64)
+			if a < target {
+				continue
+			}
+			if f := strings.Fields(lines[j]); len(f) >= 2 && f[len(f)-2] == "INCQ" && f[len(f)-1] == reg {
+				inc = true
+			}
+		}
+		if !inc {
+			return fmt.Errorf("compared register %s is not incremented before the test", reg)
+		}
+	}
+	for n, c := range remaining {
+		if c != 0 {
+			return fmt.Errorf("loop with bound %d not found", n)
+		}
+	}
+	return nil
+}
+
+// ctCounterNegativeControl is a 62-step loop with a data-dependent test
+// (like a branch on delta in divsteps62): the counter-loop check must
+// reject it.
+//
+//go:noinline
+func ctCounterNegativeControl(x uint64) uint64 {
+	var s uint64
+	for i := 0; i < 62; i++ {
+		x = x*6364136223846793005 + 1442695040888963407
+		if x>>60 == 2 {
+			s += ctNegativeSink(x)
+		}
+	}
+	return s
+}
+
+//go:noinline
+func ctNegativeSink(x uint64) uint64 { return x >> 3 }
 
 func ctTestBinary(t *testing.T) string {
 	t.Helper()

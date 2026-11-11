@@ -90,8 +90,12 @@ Enforced by tests:
   amd64, arm64, 386, ppc64le and riscv64 machine code, with Go 1.23 and
   1.25. `TestCompiledLoopsAreCounterBound` lists the branches of the
   functions with loops (counter and public-index tests) for review;
-  `TestCompiledInversionLoopsAreCounters` requires every branch of the
-  constant-time inversion to follow a counter comparison.
+  `TestCompiledInversionLoopsAreCounters` allows in the constant-time
+  inversion only the listed counter loops (INCQ R in the loop body,
+  CMPQ R, $N with the expected N, backward JL) and the stack check; a
+  negative control with a data test must fail, and a deliberately added
+  `if delta == 2` branch in `divsteps62` was rejected (Codex P2 on
+  780521d).
 - Assembly: `TestFieldAsmSourceIsStraightLine` (instruction allow-list,
   no indexed address, the dispatch as the only conditional jump),
   `TestCompiledFieldAsmIsStraightLine` (GNU objdump of the binary, which

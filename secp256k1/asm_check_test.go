@@ -228,6 +228,8 @@ var arm64Allowed = map[string]bool{
 	"MUL": true, "UMULH": true,
 	"ADDS": true, "ADCS": true, "ADC": true, "SUBS": true, "SBCS": true,
 	"CSEL": true, "RET": true,
+	// Field addition, negation and halving in vartime_arm64.s.
+	"CSET": true, "CMP": true, "ORR": true, "AND": true, "NEG": true, "LSR": true,
 	// NEON for the table scan: loads/stores (post-increment by a constant),
 	// broadcast, lane comparison and logic.
 	"VLD1.P": true, "VST1": true, "VDUP": true, "VCMEQ": true,
@@ -239,7 +241,13 @@ var arm64Allowed = map[string]bool{
 // branch at all) and that every memory operand is a fixed offset from an
 // argument pointer (R0, R1, R2) or the argument frame (FP).
 func TestArm64AsmSourceIsStraightLine(t *testing.T) {
-	src, err := os.ReadFile("field_arm64.s")
+	for _, file := range []string{"field_arm64.s", "vartime_arm64.s"} {
+		checkArm64Source(t, file)
+	}
+}
+
+func checkArm64Source(t *testing.T, file string) {
+	src, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +263,7 @@ func TestArm64AsmSourceIsStraightLine(t *testing.T) {
 			continue
 		}
 		op := strings.Fields(line)[0]
-		where := "field_arm64.s:" + strconv.Itoa(i+1) + ": " + line
+		where := file + ":" + strconv.Itoa(i+1) + ": " + line
 		if !arm64Allowed[op] {
 			t.Errorf("%s: instruction %s not allowed", where, op)
 		}
@@ -291,7 +299,7 @@ func TestCompiledArm64AsmIsStraightLine(t *testing.T) {
 	}
 	bin := ctTestBinary(t)
 	branch := regexp.MustCompile(`\s(B|BL|BR|BLR|B\.[A-Z]+|CBN?Z|TBN?Z|RET)\s`)
-	for _, name := range []string{"fieldMul", "fieldSqr", "scalarMul", "scalarSqr", "lookupAffineNEON"} {
+	for _, name := range []string{"fieldMul", "fieldSqr", "scalarMul", "scalarSqr", "lookupAffineNEON", "jacDoubleArm64"} {
 		funcs := objdump(t, bin, `secp256k1\.`+name+`\.abi0$`)
 		if len(funcs) != 1 {
 			t.Fatalf("%s: assembly function not found", name)

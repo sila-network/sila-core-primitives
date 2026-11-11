@@ -67,8 +67,10 @@ it fail, so check the control values yourself.
 
 S-8 can be closed when every production path passes on every required
 machine (amd64, arm64 with DIT) **and** the independent audit of the
-countermeasures (blinding, key and nonce shares, randomness-failure paths;
-`secp256k1/blinding.go`, `privatekey.go`, `ecdsa.go`) found no unresolved
+countermeasures (blinding, key and nonce shares with per-signature fresh
+masks, randomness-failure paths; `secp256k1/blinding.go`, `privatekey.go`,
+`ecdsa.go`), the amd64 assembly (`field_amd64.s`) and the constant-time
+inversion (`inv_ct.go`) found no unresolved
 issue. Record the outputs and the auditor's report in the security review.
 
 ## 5. What this does not cover

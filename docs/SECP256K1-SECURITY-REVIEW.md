@@ -40,8 +40,8 @@ open protocol items are BLOCKERs in the contract (§7).
 
 | Secret | Where | Protection |
 |---|---|---|
-| Private key d | `PrivateKey.d1`, `PrivateKey.d2` | Stored as random shares d = d1 + d2 (HMAC-derived mask, S-8/S-9); range check by comparisons; d·G, r·d and serialization use only the shares (additions rebuild d); constant time; no `math/big`. |
-| Nonce k | inside `sign` | RFC 6979 on stack buffers; the candidate is checked by comparisons and split into shares k1 + k2 (no multiplication on k); k·G by the blinded constant-time base table on the shares; the inversion processes k1·ρ + k2·ρ; k⁻¹ is never formed; shares overwritten after use. |
+| Private key d | `PrivateKey.d1`, `PrivateKey.d2` | Stored as random shares d = d1 + d2 (HMAC-derived mask, S-8/S-9); range check by comparisons; d·G and serialization use only the shares (additions rebuild d); every signature re-randomises them locally, d = (d1 + t) + (d2 − t) with a fresh t, before r·d1 and r·d2 (S-12); constant time; no `math/big`. |
+| Nonce k | inside `sign` | RFC 6979 on stack buffers; the candidate is checked by comparisons and split into shares k1 + k2 (no multiplication on k); k·G by the blinded constant-time base table on the shares; the inversion processes k1·ρ + k2·ρ; k⁻¹ is never formed; shares overwritten after use. The share mask, ρ and the fallback blinding are derived from the RFC 6979 key K **and 32 fresh random bytes per signature** (S-13), so repeated signatures over the same key and digest use different masks; if the random source fails they fall back to K-derived values (repeated for a repeated key and digest). |
 | Extra entropy (hedged API) | `SignWithExtraEntropy`, `SignHedged` | Copied into the stack HMAC input, cleared after use. |
 | HMAC state (K, V) | `rfc6979` value on the stack | Fixed-size stack arrays, cleared. Sign makes 0 heap allocations (`TestSignDoesNotAllocate`, `TestSignHedged`). |
 
@@ -62,22 +62,43 @@ Constant-time techniques:
   run their secret-dependent work inside
   `crypto/subtle.WithDataIndependentTiming`, which sets DIT on processors
   with FEAT_DIT (no effect elsewhere; Go 1.23 builds run without it).
+- amd64 assembly (`field_amd64.s`): field and scalar (Montgomery)
+  multiplication and squaring with MULX/ADCX/ADOX (when CPUID reports
+  BMI2 + ADX) or MULQ, and the SSE2 scan of the fixed-base table. Straight
+  line, no data-dependent address; the only branch is the CPU dispatch on
+  the start-up constant `useADX`. Other architectures and `-tags purego`
+  use the Go code.
+- Scalar inversion (the blinded k·ρ): constant-time divstep algorithm
+  (Bernstein–Yang), always 744 divsteps (≥ 741, the bound of their
+  Theorem 11.2 for 256-bit inputs), mask-only steps. The field inversion
+  stays Fermat (no measured gain).
 - The variable-time code (Jacobian formulas with explicit special cases,
-  GLV split, wNAF) is confined to `vartime.go` and is reachable only from
-  Verify and RecoverPublicKey, whose inputs are all public.
+  GLV split, wNAF, the variable-time divstep inversion, effective-affine
+  tables, the halved doubling) is confined to the `vartime*.go` files and
+  is reachable only from Verify and RecoverPublicKey, whose inputs are all
+  public.
 
 Enforced by tests:
 - `TestNoVariableTimeImports`: import allow-list; `math/big` is not on it.
 - `TestVariableTimeHelpersOnlyOnPublicPaths`: AST check that every
-  function defined in `vartime.go` is called only from Verify,
-  RecoverPublicKey and other `vartime.go` functions.
+  function defined in a `vartime*.go` file is called only from Verify,
+  RecoverPublicKey and other such functions.
 - `TestCompiledConstantTimeFunctions` (run in CI): disassembles the
   compiled field, scalar and point functions and fails on any conditional
   branch other than the stack-growth prologue; a negative control shows
   the detector finds the branches of a variable-time function. Passes for
   amd64, arm64, 386, ppc64le and riscv64 machine code, with Go 1.23 and
   1.25. `TestCompiledLoopsAreCounterBound` lists the branches of the
-  functions with loops (counter and public-index tests) for review.
+  functions with loops (counter and public-index tests) for review;
+  `TestCompiledInversionLoopsAreCounters` requires every branch of the
+  constant-time inversion to follow a counter comparison.
+- Assembly: `TestFieldAsmSourceIsStraightLine` (instruction allow-list,
+  no indexed address, the dispatch as the only conditional jump),
+  `TestCompiledFieldAsmIsStraightLine` (GNU objdump of the binary, which
+  decodes MULX/ADCX/ADOX: no jump in any implementation, one in each
+  dispatch stub), and differential tests of both implementations against
+  the Go code (`TestFieldAsmMatchesGo`, `TestScalarAsmMatchesGo`,
+  `TestLookupAffineSSE2MatchesGo`).
 
 ## 4. Findings during development (all fixed)
 
@@ -89,6 +110,9 @@ Enforced by tests:
 | S-4 | An unchecked assumption about digests ≥ n | Measured; documented in the contract | `TestSecp256k1DigestAboveOrder` |
 | S-5 | High-S handling was one rule for all contexts; raw recovery must accept high-S, transactions must not | Strict and recovery-compatible parsers; `txsig` rules; `Verify` stays strict | `TestHighSContexts`, `TestParityRawRecovery`, `TestParityValidateSignatureValues` |
 | S-6 | Branch-free source does not guarantee branch-free machine code | Compiled-code check in CI on five architectures | `TestCompiledConstantTimeFunctions` |
+| S-13 | Review finding (Codex P1, on 8973b50): the nonce share mask, ρ and the fallback blinding were derived from the RFC 6979 key K alone, so they repeated exactly for a repeated key and digest | 32 fresh random bytes per signature mixed into these derivations (no allocation); signature unchanged; fallback to K-derived masks if the source fails (documented) | `TestSignFreshMasks` |
+| S-12 | Review finding (Codex P1, on 8973b50): the stored key shares were fixed for the key's lifetime, so r·d1 and r·d2 took the same shares in every signature; the timing harness re-masked the key before every sample, hiding this pattern | Per-signature local re-randomisation d = (d1 + t) + (d2 − t), stored key unchanged; the harness now reuses each parsed key for all its samples | `TestSignFreshMasks`, `TestConstantTimeStatistical` |
+| S-11 | The compiled-code branch detector recognised on amd64 only JNE/JGE/JLE: go tool objdump prints Intel names (JE, JA, JB, JL, JG, JS, ...) that the pattern missed | Pattern extended to both naming styles (a50cbda); the re-run found no conditional branch in any listed constant-time function | `TestCompiledConstantTimeFunctions` |
 | S-10 | Review findings (Codex, two P1; fixed in ce336ed and e872dfd, re-reviewed on e872dfd with no findings) — first, on 541fc86: the nonce still entered three multiplications unmasked — its Montgomery conversion in the RFC 6979 step, k·ρ in the blinded inversion, and the final multiplication by the reconstructed k⁻¹ — so the earlier claim "no multiplication takes k" was wrong | The nonce is created as shares k = k1 + k2 in the canonical domain (range check by comparison only); k·G = ((k1 + b) + k2)·G; s = (k1·ρ + k2·ρ)⁻¹ · (ρ·z + (r·d1)·ρ + (r·d2)·ρ). Follow-up finding on ce336ed (P1): the first version recombined z + r·d (an affine encoding of d) before multiplying by ρ; the numerator now stays in shares until after the multiplication. Neither k, k⁻¹, d nor z + r·d is ever a multiplication operand | `TestBlindedInverseMatchesPlain` (masked inverse), all parity tests byte-identical |
 | S-9 | Randomness failure paths: unbounded loop on a broken source; a zero source left the key unmasked; one failure disabled the process-wide blinding | Bounded draws; HMAC-derived key mask; retry instead of `sync.Once` | `TestBlindingWithoutRandomness`, `TestRefreshBlindingBounded` |
 | S-8 | Value-dependent timing for extreme secrets on shared runners (inversion, k·G) | Blinded fixed-base multiplication; private key and nonce as random shares; inversion and numerator on shares (with S-10); corrected and counterbalanced timing harness | `TestBlinded*`, `TestPrivateKeyShares`, `TestConstantTimeStatistical` (§6.1); **mitigated — not closed** |
@@ -244,7 +268,7 @@ cryptographically secure source: a predictable one voids the protection
 | the same on a dedicated arm64 machine with FEAT_DIT (and one without) | Arm guarantees data-independent timing only under DIT | **not available**; partial: CI job on macOS arm64 (Apple Silicon, FEAT_DIT) |
 | x86 with DOIT enabled (Intel `IA32_UARCH_MISC_CTL`, AMD equivalent) | the x86 counterpart of DIT; needs kernel/BIOS support | **not available** |
 | power / electromagnetic analysis | timing tests cannot see these channels | **not available** (lab equipment) |
-| independent human audit of the blinding and masking code | the reviews so far are internal and automated | **external blocker**; requested from the owner |
+| independent human audit of the blinding and masking code, the amd64 assembly (`field_amd64.s`) and the constant-time inversion (`inv_ct.go`) | the reviews so far are internal and automated | **external blocker**; requested from the owner |
 
 Closure criterion per machine (also in the script): for every production
 path, no set of 10 runs has \|t\| > 4.5 with one sign in all runs, and the
@@ -277,6 +301,14 @@ random-vs-random controls stay below 4.5 in at least 9 of 10 runs.
 6. **Protocol integration is not specified** (contract §7): the transaction
    encoding, chain identifier, domain separation and address text format.
    The library defines none of them.
-7. **Performance:** libsecp256k1 (C) is 12 % faster for signing and 33 %
-   faster for verification and recovery (`SECP256K1-PERFORMANCE.md`).
-   Node-level throughput must be sized on the measured numbers.
+7. **Performance:** against libsecp256k1 (C) SILA is faster on the
+   development VM but 5–14 % slower on the GitHub amd64 runner and 18–27 %
+   slower on arm64 (`SECP256K1-PERFORMANCE.md`). Node-level throughput
+   must be sized on the measured numbers for the target CPU.
+8. **Assembly review surface:** the amd64 field/scalar/table assembly is
+   new (2026-11-11) and covered only by the automated checks above; it is
+   part of the independent audit (§6.3). The x86 timing guarantee for
+   MULX/ADCX/ADOX/MULQ holds under DOIT (not available here).
+9. **Randomness failure:** if the random source fails, Sign keeps working
+   with K-derived masks (S-13), which repeat for a repeated key and digest;
+   the process-wide blinding is retried on the next call (S-9).

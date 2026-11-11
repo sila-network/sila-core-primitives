@@ -118,7 +118,8 @@ func jacAddAffine(r, p *jacobian, q *affinePoint) {
 	u2.mul(&q.x, &z1z1)
 	s2.mul(&q.y, &p.z)
 	s2.mul(&s2, &z1z1)
-	subPairVartime(&h, &rr, &u2, &p.x, &s2, &p.y)
+	h.sub(&u2, &p.x)
+	rr.sub(&s2, &p.y)
 	if h.isZero() == 1 {
 		if rr.isZero() == 1 {
 			jacDouble(r, p)
@@ -620,10 +621,11 @@ func jacAddAffineZR(r *jacobian, zr *fieldElement, p *jacobian, q *affinePoint) 
 	u2.mul(&q.x, &z1z1)
 	s2.mul(&q.y, &p.z)
 	s2.mul(&s2, &z1z1)
-	subPairVartime(&h, &rr, &u2, &p.x, &s2, &p.y)
+	h.sub(&u2, &p.x)
 	if h.isZero() == 1 {
 		return false
 	}
+	rr.sub(&s2, &p.y)
 	*zr = h // z3 = z1·h
 	var z3 fieldElement
 	z3.mul(&p.z, &h)
@@ -654,7 +656,8 @@ func jacAddZinv(r, p *jacobian, b *affinePoint, bz *fieldElement) {
 	u2.mul(&b.x, &z1z1)
 	s2.mul(&b.y, &az)
 	s2.mul(&s2, &z1z1)
-	subPairVartime(&h, &rr, &u2, &p.x, &s2, &p.y)
+	h.sub(&u2, &p.x)
+	rr.sub(&s2, &p.y)
 	if h.isZero() == 1 {
 		if rr.isZero() == 1 {
 			jacDouble(r, p)
@@ -817,28 +820,4 @@ func threeHalvesVartime(z, x *fieldElement) {
 		r3, _ = bits.Add64(r3, 0, c)
 	}
 	z.v = limbs{r0, r1, r2, r3}
-}
-
-// subPairVartime sets h = a - b and r = c - d mod p (two independent
-// subtractions in one call). Public values only.
-func subPairVartime(h, r, a, b, c, d *fieldElement) {
-	var h0, h1, h2, h3, r0, r1, r2, r3, x uint64
-	h0, x = bits.Sub64(a.v[0], b.v[0], 0)
-	h1, x = bits.Sub64(a.v[1], b.v[1], x)
-	h2, x = bits.Sub64(a.v[2], b.v[2], x)
-	h3, x = bits.Sub64(a.v[3], b.v[3], x)
-	h0, x = bits.Sub64(h0, fieldC&-x, 0)
-	h1, x = bits.Sub64(h1, 0, x)
-	h2, x = bits.Sub64(h2, 0, x)
-	h3, _ = bits.Sub64(h3, 0, x)
-	r0, x = bits.Sub64(c.v[0], d.v[0], 0)
-	r1, x = bits.Sub64(c.v[1], d.v[1], x)
-	r2, x = bits.Sub64(c.v[2], d.v[2], x)
-	r3, x = bits.Sub64(c.v[3], d.v[3], x)
-	r0, x = bits.Sub64(r0, fieldC&-x, 0)
-	r1, x = bits.Sub64(r1, 0, x)
-	r2, x = bits.Sub64(r2, 0, x)
-	r3, _ = bits.Sub64(r3, 0, x)
-	h.v = limbs{h0, h1, h2, h3}
-	r.v = limbs{r0, r1, r2, r3}
 }

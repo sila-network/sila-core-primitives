@@ -302,10 +302,9 @@ func TestAddHalfVartime(t *testing.T) {
 	}
 }
 
-// TestFusedVartimeHelpers checks subTwiceVartime, subThriceVartime,
-// subPairVartime and threeHalvesVartime against the operations they
-// combine, on edge values (0, 1, 2, p-1, p-2, values next to word
-// boundaries) and random ones.
+// TestFusedVartimeHelpers checks subTwiceVartime, subThriceVartime and
+// threeHalvesVartime against the operations they combine, on edge values
+// (0, 1, 2, p-1, p-2, values next to word boundaries) and random ones.
 func TestFusedVartimeHelpers(t *testing.T) {
 	edges := []fieldElement{
 		{}, fieldFromUint(1), fieldFromUint(2),
@@ -340,13 +339,6 @@ func TestFusedVartimeHelpers(t *testing.T) {
 		want.sub(&want, &w)
 		if got != want {
 			t.Fatalf("subThriceVartime(%x, %x, %x)", x.v, y.v, w.v)
-		}
-		var h1, r1, h2, r2 fieldElement
-		subPairVartime(&h1, &r1, &x, &y, &w, &x)
-		h2.sub(&x, &y)
-		r2.sub(&w, &x)
-		if h1 != h2 || r1 != r2 {
-			t.Fatalf("subPairVartime(%x, %x, %x)", x.v, y.v, w.v)
 		}
 		threeHalvesVartime(&got, &x)
 		var h fieldElement

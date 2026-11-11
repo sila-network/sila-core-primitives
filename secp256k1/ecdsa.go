@@ -313,6 +313,12 @@ func signWithNonce(d1, d2, z, k1, k2 *scalar, c1, c2 *limbs, lambda *fieldElemen
 	var R point
 	R.scalarBaseMultShares(c1, c2, lambda, fallback)
 	x, y, _ := R.affine()
+	// Fault check: a computation error in k·G (for example an injected
+	// fault) gives a point off the curve; signing with it could expose the
+	// key when the same digest is also signed correctly (deterministic
+	// nonce). The check costs one squaring pair and a multiplication and
+	// only fails on a fault.
+	checkSigningPoint(&x, &y)
 	xb := x.bytes()
 
 	// r = x mod n. x < p < 2n, so one conditional subtraction suffices;
@@ -536,4 +542,16 @@ func hmacSHA256(key *[32]byte, parts ...[]byte) [32]byte {
 	copy(outer[block:], inner[:])
 	clear(inner[:])
 	return sha256.Sum256(outer[:])
+}
+
+// errFaultDetected is the panic value of checkSigningPoint.
+var errFaultDetected = errors.New("sila/secp256k1: fault detected: k·G is not on the curve; no signature produced")
+
+// checkSigningPoint panics unless (x, y) is on the curve. It is called on
+// R = k·G before r is taken from it: a valid computation always passes,
+// so the branch depends only on whether a fault occurred.
+func checkSigningPoint(x, y *fieldElement) {
+	if isOnCurve(x, y) != 1 {
+		panic(errFaultDetected)
+	}
 }

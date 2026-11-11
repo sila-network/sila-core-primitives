@@ -131,6 +131,7 @@ Enforced by tests:
 | S-4 | An unchecked assumption about digests ≥ n | Measured; documented in the contract | `TestSecp256k1DigestAboveOrder` |
 | S-5 | High-S handling was one rule for all contexts; raw recovery must accept high-S, transactions must not | Strict and recovery-compatible parsers; `txsig` rules; `Verify` stays strict | `TestHighSContexts`, `TestParityRawRecovery`, `TestParityValidateSignatureValues` |
 | S-6 | Branch-free source does not guarantee branch-free machine code | Compiled-code check in CI on five architectures | `TestCompiledConstantTimeFunctions` |
+| S-17 | Independent adversarial review (Claude, threat model below, on e9f37bc): no fault detection on the signing path — a fault in k·G during deterministic signing gives a faulty signature that, with a correct one over the same digest, can expose the key; PublicKey accepted an off-curve computed point as valid | Sign checks that R = k·G is on the curve before taking r and panics otherwise (fail-stop: no signature is released); `publicKeyFromPoint` rejects off-curve points. Cost about 50 ns. Faults in the scalar computation of s remain undetected (residual risk 5) | `TestFaultChecks` (injected faults: wrong or bit-flipped coordinate, zero point; an AST check that signWithNonce calls the check — removing the call fails it) |
 | S-16 | Review findings (Codex P2 ×2, on 30ee539) on the timing harness: (a) the timed Sign/PublicKey read the key through a pointer to one of three per-class allocations, so the key's address and cache placement were correlated with the class, and counterbalancing cannot cancel that; (b) the detector compared only cropped samples (50/75/90 %), so a leak confined to the slowest observations of one class is removed by every crop (a synthetic 5 % tail gives raw t ≈ 23, cropped t = 0) | (a) the selected key is copied (untimed) into one fixed PrivateKey before every sample, shares unchanged; (b) the uncropped comparison is included in the maximum | (a) `TestConstantTimeStatistical`; (b) negative control `TestTimingDetectorTailLeak` |
 | S-15 | Review finding (Codex P1, on 30ee539): the fixed-base multiplication of Sign received k + b with the process-wide blinding b: for a repeated key and digest the same value was converted out of Montgomery form (a multiplication taking it as operand) and drove identical point arithmetic in every call; across messages the shared b would let inferred k_i + b values be combined with the public ECDSA equations to recover the key (operand inference on hardware without DIT/DOIT is the prerequisite, not demonstrated) | The sum c1 + c2 + b is formed from canonical shares with modular additions only and consumed by `scalarBaseMultCanonical`, which extracts digits with shifts and masks (no multiplication takes it); the accumulator starts at (0 : λ : 0) with λ fresh per call (Sign: HMAC of K and the fresh bytes, label 'Z'; PublicKey: of the key and fresh bytes), so every field multiplication of k·G takes freshly randomised coordinates, also for a repeated nonce. b itself still changes only with `RefreshBlinding` (a fresh b per signature would cost one more fixed-base multiplication) | `TestBlindedBaseMultMatchesPlain` (equal points, different projective coordinates for different λ, process-wide and fallback blinding), `TestKeyReconstructionHasNoMultiplication` (now also `scalarBaseMultShares`, `scalarBaseMultCanonical`), `TestSignFreshMasks` ('Z' depends on the fresh bytes), compiled-code loop check extended to `scalarBaseMultCanonical` |
 | S-14 | Review finding (Codex P1, on 8aec3bc): before the per-signature re-randomisation, Sign rebuilt d for RFC 6979 with `dBytes → canonicalD → fromMont`, multiplying both fixed stored shares on every signature (also in `Bytes`) | The key also keeps its shares in canonical form (c1 + c2 = d); d is rebuilt by a modular addition only, so no stored share is a multiplication operand on that path | `TestKeyReconstructionHasNoMultiplication` (AST check + share consistency; a reintroduced `canonical()` call fails it) |
@@ -323,8 +324,13 @@ random-vs-random controls stay below 4.5 in at least 9 of 10 runs.
    outside the package's control.
 5. **Fault attacks:** the default deterministic signing is exposed to
    fault injection (a glitch during signing can leak the key from two
-   signatures over the same digest). `SignHedged` mitigates this; using it
-   is the caller's or the protocol's decision.
+   signatures over the same digest). Since S-17, Sign stops (panics)
+   when R = k·G is not on the curve and PublicKey rejects an off-curve
+   result, which catches faults in the point computation; a fault in the
+   scalar computation of s is not detected (that would need a second
+   computation or a verification, about +30 µs). `SignHedged` mitigates
+   the differential attack; using it is the caller's or the protocol's
+   decision.
 6. **Protocol integration is not specified** (contract §7): the transaction
    encoding, chain identifier, domain separation and address text format.
    The library defines none of them.
@@ -339,10 +345,41 @@ random-vs-random controls stay below 4.5 in at least 9 of 10 runs.
    above and AI code review; it is part of the independent audit (§6.3).
    The x86 timing guarantee for MULX/ADCX/ADOX/MULQ holds under DOIT, the
    Arm one under DIT (dedicated measurements not available here).
-9. **PublicKey repeats a masked operand:** `PrivateKey.PublicKey` converts
-   (d + b)·R out of Montgomery form, where b is the process-wide blinding;
-   repeated calls with the same key use the same masked value until
-   `RefreshBlinding` (no fixed share is used, unlike S-14).
+9. **Process-wide blinding b:** the k·G / d·G blinding changes only with
+   `RefreshBlinding`. Since S-15 the sum c1 + c2 + b is never a
+   multiplication operand and the point arithmetic is re-randomised per
+   call, so this no longer repeats any multiplication operand; a fresh b
+   per call would cost one more fixed-base multiplication.
 10. **Randomness failure:** if the random source fails, Sign keeps working
    with K-derived masks (S-13), which repeat for a repeated key and digest;
    the process-wide blinding is retried on the next call (S-9).
+
+## 8. Independent adversarial AI review record (Gate B, Issue #4)
+
+- **Reviewer and method:** Claude (an AI model, not a human auditor), a
+  pass separate from the Codex reviews, with its own threat model: an
+  attacker who (a) observes operand-dependent timing of multiplications
+  on hardware without DIT/DOIT, (b) can repeat Sign over the same key and
+  digest and average, (c) controls or breaks the random source, (d) runs
+  concurrent API calls, (e) can inject transient computation faults, and
+  (f) exploits gaps in the test and timing tooling. Each claim was
+  checked against the code and an executable test, and mutations
+  (removing a check or reintroducing a multiplication) were used to
+  confirm the tests fail.
+- **Reviewed SHA:** `e9f37bc` (code), with the fixes below on top.
+- **Findings:** S-17 (fault detection, fixed with a regression test). No
+  new finding on: nonce and key shares (S-10, S-12, S-14, S-15 tests),
+  HMAC mask derivations and their dependence on fresh bytes (S-13, 'Z'),
+  entropy failure and fallback (`TestBlindingWithoutRandomness`,
+  `TestSignFreshMasks`), concurrency with `RefreshBlinding`
+  (`TestRefreshBlindingKeepsSignaturesAndIsConcurrent`, under `-race`),
+  key zeroisation (`TestPrivateKeyValidation`,
+  `TestKeyReconstructionHasNoMultiplication`), signature parity (RFC 6979,
+  Wycheproof, differential tests), compiled code on two Go versions and
+  several architectures (CI), and the timing detector (S-16).
+- **Limits:** AI review is not a formal security certification and is not
+  a human audit. It does not show that no side channel exists; the
+  dedicated-hardware measurements of Gate A (§6.3) remain required, and
+  S-8 stays **Mitigated — Not Closed**. Go's runtime may copy secret
+  values (stack growth, garbage collection) where `Zero` cannot reach
+  them; faults in the scalar arithmetic of s are not detected (risk 5).

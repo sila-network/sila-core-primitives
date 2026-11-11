@@ -8,6 +8,9 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"math/big"
 	"math/rand"
 	"testing"
@@ -401,5 +404,65 @@ func TestSignDoesNotAllocate(t *testing.T) {
 	}
 	if n := testing.AllocsPerRun(20, func() { Sign(priv, digest) }); n != 0 {
 		t.Fatalf("Sign allocates %v times", n)
+	}
+}
+
+// TestFaultChecks injects computation faults into the points Sign and
+// PublicKey derive their outputs from: a point off the curve (a flipped
+// coordinate bit, a wrong coordinate) must stop Sign (panic, no
+// signature) and make PublicKey fail, while every valid point passes.
+func TestFaultChecks(t *testing.T) {
+	gx, gy, _ := generator.affine()
+	checkSigningPoint(&gx, &gy) // valid: no panic
+	faulty := []struct{ x, y fieldElement }{
+		{gx, fieldFromUint(1)},
+		{fieldFromUint(5), gy},
+		{gx, *new(fieldElement).add(&gy, &fieldOne)},
+		{fieldElement{}, fieldElement{}},
+	}
+	flipped := gy
+	flipped.v[2] ^= 1 << 17
+	faulty = append(faulty, struct{ x, y fieldElement }{gx, flipped})
+	for i, f := range faulty {
+		func() {
+			defer func() {
+				if r := recover(); r != errFaultDetected {
+					t.Fatalf("case %d: fault not detected (recover = %v)", i, r)
+				}
+			}()
+			checkSigningPoint(&f.x, &f.y)
+		}()
+		p := point{x: f.x, y: f.y, z: fieldOne}
+		if _, err := publicKeyFromPoint(&p); err == nil {
+			t.Fatalf("case %d: off-curve point accepted as a public key", i)
+		}
+	}
+	// Sign must actually run the check on R (a removed call fails here).
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "ecdsa.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	for _, decl := range f.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "signWithNonce" {
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if c, ok := n.(*ast.CallExpr); ok {
+					if id, ok := c.Fun.(*ast.Ident); ok && id.Name == "checkSigningPoint" {
+						called = true
+					}
+				}
+				return true
+			})
+		}
+	}
+	if !called {
+		t.Fatal("signWithNonce does not call checkSigningPoint")
+	}
+	// Valid points still give valid keys.
+	var p2 point
+	p2.double(&generator)
+	if _, err := publicKeyFromPoint(&p2); err != nil {
+		t.Fatal(err)
 	}
 }

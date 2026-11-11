@@ -72,7 +72,8 @@ func liftX(y, x *fieldElement, oddY uint64) bool {
 func publicKeyFromPoint(p *point) (PublicKey, error) {
 	var out PublicKey
 	x, y, ok := p.affine()
-	if ok != 1 {
+	// The on-curve check also catches a computation fault in d·G.
+	if ok&isOnCurve(&x, &y) != 1 {
 		return out, ErrInvalidPublicKey
 	}
 	out.x = x.bytes()

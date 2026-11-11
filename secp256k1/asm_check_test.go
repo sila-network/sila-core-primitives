@@ -219,3 +219,96 @@ func TestCompiledFieldAsmIsStraightLine(t *testing.T) {
 		t.Fatalf("found %d of %d assembly functions", found, len(want))
 	}
 }
+
+// arm64Allowed lists every instruction field_arm64.s may use: data-
+// independent under PSTATE.DIT (Arm's DIT instruction list), no control
+// transfer other than RET, no data-dependent address.
+var arm64Allowed = map[string]bool{
+	"MOVD": true, "MOVK": true, "LDP": true, "STP": true,
+	"MUL": true, "UMULH": true,
+	"ADDS": true, "ADCS": true, "ADC": true, "SUBS": true, "SBCS": true,
+	"CSEL": true, "RET": true,
+}
+
+// TestArm64AsmSourceIsStraightLine reads field_arm64.s (on every platform)
+// and checks that every instruction is in arm64Allowed (so there is no
+// branch at all) and that every memory operand is a fixed offset from an
+// argument pointer (R0, R1, R2) or the argument frame (FP).
+func TestArm64AsmSourceIsStraightLine(t *testing.T) {
+	src, err := os.ReadFile("field_arm64.s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	memOperand := regexp.MustCompile(`\(([^)]*)\)`)
+	n := 0
+	for i, raw := range strings.Split(string(src), "\n") {
+		line := raw
+		if j := strings.Index(line, "//"); j >= 0 {
+			line = line[:j]
+		}
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "TEXT ") {
+			continue
+		}
+		op := strings.Fields(line)[0]
+		where := "field_arm64.s:" + strconv.Itoa(i+1) + ": " + line
+		if !arm64Allowed[op] {
+			t.Errorf("%s: instruction %s not allowed", where, op)
+		}
+		for _, m := range memOperand.FindAllStringSubmatch(line, -1) {
+			switch m[1] {
+			case "R0", "R1", "R2", "FP":
+			default:
+				// Register lists of LDP/STP, e.g. (R3, R4).
+				if op != "LDP" && op != "STP" || !strings.Contains(m[1], ",") {
+					t.Errorf("%s: memory operand (%s) not allowed", where, m[1])
+				}
+			}
+		}
+		n++
+	}
+	if n < 400 {
+		t.Fatalf("only %d instructions read", n)
+	}
+}
+
+// TestCompiledArm64AsmIsStraightLine disassembles the arm64 build (go tool
+// objdump decodes arm64 fully) and checks that the four assembly
+// functions contain no branch of any kind, only straight-line code ending
+// in RET. Runs where the compiled-code checks run with SILA_CT_GOARCH=arm64
+// (or natively on arm64).
+func TestCompiledArm64AsmIsStraightLine(t *testing.T) {
+	arch := runtime.GOARCH
+	if a := os.Getenv("SILA_CT_GOARCH"); a != "" {
+		arch = a
+	}
+	if arch != "arm64" {
+		t.Skip("arm64 only (set SILA_CT_GOARCH=arm64)")
+	}
+	bin := ctTestBinary(t)
+	branch := regexp.MustCompile(`\s(B|BL|BR|BLR|B\.[A-Z]+|CBN?Z|TBN?Z|RET)\s`)
+	for _, name := range []string{"fieldMul", "fieldSqr", "scalarMul", "scalarSqr"} {
+		funcs := objdump(t, bin, `secp256k1\.`+name+`\.abi0$`)
+		if len(funcs) != 1 {
+			t.Fatalf("%s: assembly function not found", name)
+		}
+		for fn, body := range funcs {
+			rets := 0
+			for _, l := range strings.Split(body, "\n") {
+				if !instr.MatchString(l) {
+					continue
+				}
+				if m := branch.FindStringSubmatch(l); m != nil {
+					if m[1] == "RET" {
+						rets++
+						continue
+					}
+					t.Errorf("%s: branch in assembly: %s", fn, l)
+				}
+			}
+			if rets != 1 {
+				t.Errorf("%s: %d RET instructions, want exactly 1", fn, rets)
+			}
+		}
+	}
+}

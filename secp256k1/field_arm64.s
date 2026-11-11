@@ -1,0 +1,663 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ahmed Ibrahim
+
+//go:build arm64 && !purego
+
+#include "textflag.h"
+
+// Field multiplication and squaring modulo p = 2^256 - 2^32 - 977 and
+// scalar Montgomery multiplication modulo the group order n, for arm64.
+// Same algorithms as the portable Go code (mulWords + reduceWords /
+// montReduceN): the 512-bit product is formed row by row with MUL/UMULH
+// and ADDS/ADCS carry chains (which the Go compiler cannot keep in the
+// flags), then reduced; the final selections use CSEL.
+//
+// Constant time: straight-line code (no branch at all), every memory
+// access at a fixed offset from an argument pointer, and only MUL, UMULH,
+// ADDS/ADCS/ADC, SUBS/SBCS, CSEL, MOVD, LDP/STP — instructions with data-
+// independent timing under PSTATE.DIT (Arm DIT list), which Sign and
+// PublicKey enable on processors with FEAT_DIT (Go >= 1.24). All inputs
+// are loaded before any output is stored, so z may alias x or y.
+// Squaring uses the product code with y = x.
+//
+// Registers: R3..R6 = x, R7..R10 = y (then n and m in the reduction),
+// R11..R17, R19, R20 = t0..t8, R21..R24 temporaries, R25 the constant.
+// R18 (platform), R26..R30 are not used.
+
+// func fieldMul(z, x, y *limbs)
+TEXT ·fieldMul(SB), NOSPLIT, $0-24
+	MOVD x+8(FP), R1
+	MOVD y+16(FP), R2
+	LDP (R1), (R3, R4)
+	LDP 16(R1), (R5, R6)
+	LDP (R2), (R7, R8)
+	LDP 16(R2), (R9, R10)
+	// Row 0: t0..t4 = x0·y (low halves, then high halves one word up).
+	MUL R7, R3, R11
+	MUL R8, R3, R12
+	MUL R9, R3, R13
+	MUL R10, R3, R14
+	MOVD ZR, R15
+	UMULH R7, R3, R21
+	UMULH R8, R3, R22
+	UMULH R9, R3, R23
+	UMULH R10, R3, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADC R24, R15, R15
+	// Row 1: t1..t5 += x1·y.
+	MUL R7, R4, R21
+	MUL R8, R4, R22
+	MUL R9, R4, R23
+	MUL R10, R4, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADCS R24, R15, R15
+	ADC ZR, ZR, R16
+	UMULH R7, R4, R21
+	UMULH R8, R4, R22
+	UMULH R9, R4, R23
+	UMULH R10, R4, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADC R24, R16, R16
+	// Row 2: t2..t6 += x2·y.
+	MUL R7, R5, R21
+	MUL R8, R5, R22
+	MUL R9, R5, R23
+	MUL R10, R5, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADCS R24, R16, R16
+	ADC ZR, ZR, R17
+	UMULH R7, R5, R21
+	UMULH R8, R5, R22
+	UMULH R9, R5, R23
+	UMULH R10, R5, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADC R24, R17, R17
+	// Row 3: t3..t7 += x3·y.
+	MUL R7, R6, R21
+	MUL R8, R6, R22
+	MUL R9, R6, R23
+	MUL R10, R6, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADC ZR, ZR, R19
+	UMULH R7, R6, R21
+	UMULH R8, R6, R22
+	UMULH R9, R6, R23
+	UMULH R10, R6, R24
+	ADDS R21, R15, R15
+	ADCS R22, R16, R16
+	ADCS R23, R17, R17
+	ADC R24, R19, R19
+	// Reduction modulo p: fold t4..t7 with 2^256 ≡ c = 0x1000003D1; the top
+	// word r4 < 2^34 goes to t8.
+	MOVD $0x1000003D1, R25
+	MUL R25, R15, R21
+	MUL R25, R16, R22
+	MUL R25, R17, R23
+	MUL R25, R19, R24
+	ADDS R21, R11, R11
+	ADCS R22, R12, R12
+	ADCS R23, R13, R13
+	ADCS R24, R14, R14
+	ADC ZR, ZR, R20
+	UMULH R25, R15, R21
+	UMULH R25, R16, R22
+	UMULH R25, R17, R23
+	UMULH R25, R19, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADC R24, R20, R20
+	// Second fold: r4·c < 2^68.
+	MUL R25, R20, R21
+	UMULH R25, R20, R22
+	ADDS R21, R11, R11
+	ADCS R22, R12, R12
+	ADCS ZR, R13, R13
+	ADCS ZR, R14, R14
+	// A carry out is worth c; the sum is then small and cannot carry again.
+	CSEL CS, R25, ZR, R21
+	ADDS R21, R11, R11
+	ADCS ZR, R12, R12
+	ADCS ZR, R13, R13
+	ADC ZR, R14, R14
+	// Final correction (value < 2p): t - p = t + c mod 2^256, taken
+	// exactly when t + c carries.
+	ADDS R25, R11, R21
+	ADCS ZR, R12, R22
+	ADCS ZR, R13, R23
+	ADCS ZR, R14, R24
+	CSEL CS, R21, R11, R11
+	CSEL CS, R22, R12, R12
+	CSEL CS, R23, R13, R13
+	CSEL CS, R24, R14, R14
+	MOVD z+0(FP), R0
+	STP (R11, R12), (R0)
+	STP (R13, R14), 16(R0)
+	RET
+
+// func fieldSqr(z, x *limbs)
+TEXT ·fieldSqr(SB), NOSPLIT, $0-16
+	MOVD x+8(FP), R1
+	MOVD x+8(FP), R2
+	LDP (R1), (R3, R4)
+	LDP 16(R1), (R5, R6)
+	LDP (R2), (R7, R8)
+	LDP 16(R2), (R9, R10)
+	// Row 0: t0..t4 = x0·y (low halves, then high halves one word up).
+	MUL R7, R3, R11
+	MUL R8, R3, R12
+	MUL R9, R3, R13
+	MUL R10, R3, R14
+	MOVD ZR, R15
+	UMULH R7, R3, R21
+	UMULH R8, R3, R22
+	UMULH R9, R3, R23
+	UMULH R10, R3, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADC R24, R15, R15
+	// Row 1: t1..t5 += x1·y.
+	MUL R7, R4, R21
+	MUL R8, R4, R22
+	MUL R9, R4, R23
+	MUL R10, R4, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADCS R24, R15, R15
+	ADC ZR, ZR, R16
+	UMULH R7, R4, R21
+	UMULH R8, R4, R22
+	UMULH R9, R4, R23
+	UMULH R10, R4, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADC R24, R16, R16
+	// Row 2: t2..t6 += x2·y.
+	MUL R7, R5, R21
+	MUL R8, R5, R22
+	MUL R9, R5, R23
+	MUL R10, R5, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADCS R24, R16, R16
+	ADC ZR, ZR, R17
+	UMULH R7, R5, R21
+	UMULH R8, R5, R22
+	UMULH R9, R5, R23
+	UMULH R10, R5, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADC R24, R17, R17
+	// Row 3: t3..t7 += x3·y.
+	MUL R7, R6, R21
+	MUL R8, R6, R22
+	MUL R9, R6, R23
+	MUL R10, R6, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADC ZR, ZR, R19
+	UMULH R7, R6, R21
+	UMULH R8, R6, R22
+	UMULH R9, R6, R23
+	UMULH R10, R6, R24
+	ADDS R21, R15, R15
+	ADCS R22, R16, R16
+	ADCS R23, R17, R17
+	ADC R24, R19, R19
+	// Reduction modulo p: fold t4..t7 with 2^256 ≡ c = 0x1000003D1; the top
+	// word r4 < 2^34 goes to t8.
+	MOVD $0x1000003D1, R25
+	MUL R25, R15, R21
+	MUL R25, R16, R22
+	MUL R25, R17, R23
+	MUL R25, R19, R24
+	ADDS R21, R11, R11
+	ADCS R22, R12, R12
+	ADCS R23, R13, R13
+	ADCS R24, R14, R14
+	ADC ZR, ZR, R20
+	UMULH R25, R15, R21
+	UMULH R25, R16, R22
+	UMULH R25, R17, R23
+	UMULH R25, R19, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADC R24, R20, R20
+	// Second fold: r4·c < 2^68.
+	MUL R25, R20, R21
+	UMULH R25, R20, R22
+	ADDS R21, R11, R11
+	ADCS R22, R12, R12
+	ADCS ZR, R13, R13
+	ADCS ZR, R14, R14
+	// A carry out is worth c; the sum is then small and cannot carry again.
+	CSEL CS, R25, ZR, R21
+	ADDS R21, R11, R11
+	ADCS ZR, R12, R12
+	ADCS ZR, R13, R13
+	ADC ZR, R14, R14
+	// Final correction (value < 2p): t - p = t + c mod 2^256, taken
+	// exactly when t + c carries.
+	ADDS R25, R11, R21
+	ADCS ZR, R12, R22
+	ADCS ZR, R13, R23
+	ADCS ZR, R14, R24
+	CSEL CS, R21, R11, R11
+	CSEL CS, R22, R12, R12
+	CSEL CS, R23, R13, R13
+	CSEL CS, R24, R14, R14
+	MOVD z+0(FP), R0
+	STP (R11, R12), (R0)
+	STP (R13, R14), 16(R0)
+	RET
+
+// func scalarMul(z, x, y, n *limbs)
+TEXT ·scalarMul(SB), NOSPLIT, $0-32
+	MOVD x+8(FP), R1
+	MOVD y+16(FP), R2
+	LDP (R1), (R3, R4)
+	LDP 16(R1), (R5, R6)
+	LDP (R2), (R7, R8)
+	LDP 16(R2), (R9, R10)
+	// Row 0: t0..t4 = x0·y (low halves, then high halves one word up).
+	MUL R7, R3, R11
+	MUL R8, R3, R12
+	MUL R9, R3, R13
+	MUL R10, R3, R14
+	MOVD ZR, R15
+	UMULH R7, R3, R21
+	UMULH R8, R3, R22
+	UMULH R9, R3, R23
+	UMULH R10, R3, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADC R24, R15, R15
+	// Row 1: t1..t5 += x1·y.
+	MUL R7, R4, R21
+	MUL R8, R4, R22
+	MUL R9, R4, R23
+	MUL R10, R4, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADCS R24, R15, R15
+	ADC ZR, ZR, R16
+	UMULH R7, R4, R21
+	UMULH R8, R4, R22
+	UMULH R9, R4, R23
+	UMULH R10, R4, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADC R24, R16, R16
+	// Row 2: t2..t6 += x2·y.
+	MUL R7, R5, R21
+	MUL R8, R5, R22
+	MUL R9, R5, R23
+	MUL R10, R5, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADCS R24, R16, R16
+	ADC ZR, ZR, R17
+	UMULH R7, R5, R21
+	UMULH R8, R5, R22
+	UMULH R9, R5, R23
+	UMULH R10, R5, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADC R24, R17, R17
+	// Row 3: t3..t7 += x3·y.
+	MUL R7, R6, R21
+	MUL R8, R6, R22
+	MUL R9, R6, R23
+	MUL R10, R6, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADC ZR, ZR, R19
+	UMULH R7, R6, R21
+	UMULH R8, R6, R22
+	UMULH R9, R6, R23
+	UMULH R10, R6, R24
+	ADDS R21, R15, R15
+	ADCS R22, R16, R16
+	ADCS R23, R17, R17
+	ADC R24, R19, R19
+	// Montgomery reduction modulo n: four rows m = t_i·(-n^-1) mod 2^64,
+	// t += m·n·2^(64i); t8 collects the top carries.
+	MOVD n+24(FP), R2
+	LDP (R2), (R3, R4)
+	LDP 16(R2), (R5, R6)
+	MOVD $0x4B0DFF665588B13F, R25
+	MOVD ZR, R20
+	// Row 0.
+	MUL R25, R11, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R11, R11
+	ADCS R22, R12, R12
+	ADCS R23, R13, R13
+	ADCS R24, R14, R14
+	ADCS ZR, R15, R15
+	ADCS ZR, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADCS R24, R15, R15
+	ADCS ZR, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	// Row 1.
+	MUL R25, R12, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADCS R24, R15, R15
+	ADCS ZR, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADCS R24, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	// Row 2.
+	MUL R25, R13, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADCS R24, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	// Row 3.
+	MUL R25, R14, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R15, R15
+	ADCS R22, R16, R16
+	ADCS R23, R17, R17
+	ADCS R24, R19, R19
+	ADC ZR, R20, R20
+	// The result t8·2^256 + t4..t7 is below 2n: subtract n unless that
+	// borrows (CS after SBCS means no borrow).
+	SUBS R3, R15, R21
+	SBCS R4, R16, R22
+	SBCS R5, R17, R23
+	SBCS R6, R19, R24
+	SBCS ZR, R20, R7
+	CSEL CS, R21, R15, R15
+	CSEL CS, R22, R16, R16
+	CSEL CS, R23, R17, R17
+	CSEL CS, R24, R19, R19
+	MOVD z+0(FP), R0
+	STP (R15, R16), (R0)
+	STP (R17, R19), 16(R0)
+	RET
+
+// func scalarSqr(z, x, n *limbs)
+TEXT ·scalarSqr(SB), NOSPLIT, $0-24
+	MOVD x+8(FP), R1
+	MOVD x+8(FP), R2
+	LDP (R1), (R3, R4)
+	LDP 16(R1), (R5, R6)
+	LDP (R2), (R7, R8)
+	LDP 16(R2), (R9, R10)
+	// Row 0: t0..t4 = x0·y (low halves, then high halves one word up).
+	MUL R7, R3, R11
+	MUL R8, R3, R12
+	MUL R9, R3, R13
+	MUL R10, R3, R14
+	MOVD ZR, R15
+	UMULH R7, R3, R21
+	UMULH R8, R3, R22
+	UMULH R9, R3, R23
+	UMULH R10, R3, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADC R24, R15, R15
+	// Row 1: t1..t5 += x1·y.
+	MUL R7, R4, R21
+	MUL R8, R4, R22
+	MUL R9, R4, R23
+	MUL R10, R4, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADCS R24, R15, R15
+	ADC ZR, ZR, R16
+	UMULH R7, R4, R21
+	UMULH R8, R4, R22
+	UMULH R9, R4, R23
+	UMULH R10, R4, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADC R24, R16, R16
+	// Row 2: t2..t6 += x2·y.
+	MUL R7, R5, R21
+	MUL R8, R5, R22
+	MUL R9, R5, R23
+	MUL R10, R5, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADCS R24, R16, R16
+	ADC ZR, ZR, R17
+	UMULH R7, R5, R21
+	UMULH R8, R5, R22
+	UMULH R9, R5, R23
+	UMULH R10, R5, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADC R24, R17, R17
+	// Row 3: t3..t7 += x3·y.
+	MUL R7, R6, R21
+	MUL R8, R6, R22
+	MUL R9, R6, R23
+	MUL R10, R6, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADC ZR, ZR, R19
+	UMULH R7, R6, R21
+	UMULH R8, R6, R22
+	UMULH R9, R6, R23
+	UMULH R10, R6, R24
+	ADDS R21, R15, R15
+	ADCS R22, R16, R16
+	ADCS R23, R17, R17
+	ADC R24, R19, R19
+	// Montgomery reduction modulo n: four rows m = t_i·(-n^-1) mod 2^64,
+	// t += m·n·2^(64i); t8 collects the top carries.
+	MOVD n+16(FP), R2
+	LDP (R2), (R3, R4)
+	LDP 16(R2), (R5, R6)
+	MOVD $0x4B0DFF665588B13F, R25
+	MOVD ZR, R20
+	// Row 0.
+	MUL R25, R11, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R11, R11
+	ADCS R22, R12, R12
+	ADCS R23, R13, R13
+	ADCS R24, R14, R14
+	ADCS ZR, R15, R15
+	ADCS ZR, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADCS R24, R15, R15
+	ADCS ZR, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	// Row 1.
+	MUL R25, R12, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADCS R24, R15, R15
+	ADCS ZR, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADCS R24, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	// Row 2.
+	MUL R25, R13, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADCS R24, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	// Row 3.
+	MUL R25, R14, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R15, R15
+	ADCS R22, R16, R16
+	ADCS R23, R17, R17
+	ADCS R24, R19, R19
+	ADC ZR, R20, R20
+	// The result t8·2^256 + t4..t7 is below 2n: subtract n unless that
+	// borrows (CS after SBCS means no borrow).
+	SUBS R3, R15, R21
+	SBCS R4, R16, R22
+	SBCS R5, R17, R23
+	SBCS R6, R19, R24
+	SBCS ZR, R20, R7
+	CSEL CS, R21, R15, R15
+	CSEL CS, R22, R16, R16
+	CSEL CS, R23, R17, R17
+	CSEL CS, R24, R19, R19
+	MOVD z+0(FP), R0
+	STP (R15, R16), (R0)
+	STP (R17, R19), 16(R0)
+	RET

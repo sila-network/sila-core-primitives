@@ -17,7 +17,11 @@ Benchmarks run [#43025834696](https://github.com/sila-network/sila-core-primitiv
 | ubuntu-24.04-arm (Neoverse-N2) | **25.10 vs 26.51 µs: SILA 5.6 % faster** | **32.57 vs 33.65 µs: SILA 3.3 % faster** | **38.48 vs 38.98 µs: SILA 1.3 % faster** |
 | ubuntu-latest (AMD EPYC 9V74) | **22.53 vs 22.70 µs: SILA 0.8 % faster** | **29.75 vs 36.31 µs: SILA 22 % faster** | **35.36 vs 42.00 µs: SILA 19 % faster** |
 
-All six differences have p = 0.002. The amd64 result depends on the
+All six differences have p = 0.002. Since S-18 (owner decision,
+2026-11-11) Sign computes k·G twice as a fault check, which adds about
+one fixed-base multiplication (about 14 µs on the arm64 runner) and
+gives up the Sign lead shown above; Verify and Recover are unchanged.
+The current Sign figures are in the latest Benchmarks run. The amd64 result depends on the
 runner's CPU: on an Intel Xeon Platinum 8573C runner (run of `2e26a3b`,
 before the last two steps) libsecp256k1 was 1.5 % faster on Sign and 6 %
 faster on Recover, with Verify not significantly different. Shared

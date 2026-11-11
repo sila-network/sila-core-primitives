@@ -437,27 +437,45 @@ func TestFaultChecks(t *testing.T) {
 			t.Fatalf("case %d: off-curve point accepted as a public key", i)
 		}
 	}
-	// Sign must actually run the check on R (a removed call fails here).
+	// A wrong point that is still on the curve (for example (k + b)·G
+	// when the final addition of −b·G is skipped): only the comparison of
+	// the two independent computations catches it.
+	var g2, g2b point
+	g2.double(&generator)
+	lam := fieldFromUint(12345)
+	g2b = point{x: *new(fieldElement).mul(&g2.x, &lam), y: *new(fieldElement).mul(&g2.y, &lam), z: *new(fieldElement).mul(&g2.z, &lam)}
+	checkSamePoint(&g2, &g2b) // same point, other representation: no panic
+	func() {
+		defer func() {
+			if r := recover(); r != errFaultDetected {
+				t.Fatalf("on-curve wrong point not detected (recover = %v)", r)
+			}
+		}()
+		checkSamePoint(&g2, &generator)
+	}()
+	// Sign must actually run both checks (a removed call fails here).
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "ecdsa.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	called := false
+	called := map[string]bool{}
 	for _, decl := range f.Decls {
 		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "signWithNonce" {
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				if c, ok := n.(*ast.CallExpr); ok {
-					if id, ok := c.Fun.(*ast.Ident); ok && id.Name == "checkSigningPoint" {
-						called = true
+					if id, ok := c.Fun.(*ast.Ident); ok {
+						called[id.Name] = true
 					}
 				}
 				return true
 			})
 		}
 	}
-	if !called {
-		t.Fatal("signWithNonce does not call checkSigningPoint")
+	for _, name := range []string{"checkSigningPoint", "checkSamePoint"} {
+		if !called[name] {
+			t.Fatalf("signWithNonce does not call %s", name)
+		}
 	}
 	// Valid points still give valid keys.
 	var p2 point

@@ -131,6 +131,7 @@ Enforced by tests:
 | S-4 | An unchecked assumption about digests ≥ n | Measured; documented in the contract | `TestSecp256k1DigestAboveOrder` |
 | S-5 | High-S handling was one rule for all contexts; raw recovery must accept high-S, transactions must not | Strict and recovery-compatible parsers; `txsig` rules; `Verify` stays strict | `TestHighSContexts`, `TestParityRawRecovery`, `TestParityValidateSignatureValues` |
 | S-6 | Branch-free source does not guarantee branch-free machine code | Compiled-code check in CI on five architectures | `TestCompiledConstantTimeFunctions` |
+| S-18 | Review finding (Codex P1, on 633898b): the S-17 on-curve check misses faults that give a wrong point on the curve — skipping the final addition of −b·G yields (k + b)·G, which passed the check, and the faulty signature together with a correct one over the same digest recovered the key | Sign computes k·G twice with independent projective randomisers (labels 'Z' and 'Y', fresh per signature) and compares the results projectively in constant time; on a mismatch, or a point off the curve, it panics and releases no signature. Owner decision (2026-11-11): full check in Sign, at the cost of one more fixed-base multiplication per signature | `TestFaultChecks` (a wrong on-curve point is detected; the same point in another representation passes; an AST check that signWithNonce calls both checks — removing either fails it), `TestSignFreshMasks` ('Y') |
 | S-17 | Independent adversarial review (Claude, threat model below, on e9f37bc): no fault detection on the signing path — a fault in k·G during deterministic signing gives a faulty signature that, with a correct one over the same digest, can expose the key; PublicKey accepted an off-curve computed point as valid | Sign checks that R = k·G is on the curve before taking r and panics otherwise (fail-stop: no signature is released); `publicKeyFromPoint` rejects off-curve points. Cost about 50 ns. Faults in the scalar computation of s remain undetected (residual risk 5) | `TestFaultChecks` (injected faults: wrong or bit-flipped coordinate, zero point; an AST check that signWithNonce calls the check — removing the call fails it) |
 | S-16 | Review findings (Codex P2 ×2, on 30ee539) on the timing harness: (a) the timed Sign/PublicKey read the key through a pointer to one of three per-class allocations, so the key's address and cache placement were correlated with the class, and counterbalancing cannot cancel that; (b) the detector compared only cropped samples (50/75/90 %), so a leak confined to the slowest observations of one class is removed by every crop (a synthetic 5 % tail gives raw t ≈ 23, cropped t = 0) | (a) the selected key is copied (untimed) into one fixed PrivateKey before every sample, shares unchanged; (b) the uncropped comparison is included in the maximum | (a) `TestConstantTimeStatistical`; (b) negative control `TestTimingDetectorTailLeak` |
 | S-15 | Review finding (Codex P1, on 30ee539): the fixed-base multiplication of Sign received k + b with the process-wide blinding b: for a repeated key and digest the same value was converted out of Montgomery form (a multiplication taking it as operand) and drove identical point arithmetic in every call; across messages the shared b would let inferred k_i + b values be combined with the public ECDSA equations to recover the key (operand inference on hardware without DIT/DOIT is the prerequisite, not demonstrated) | The sum c1 + c2 + b is formed from canonical shares with modular additions only and consumed by `scalarBaseMultCanonical`, which extracts digits with shifts and masks (no multiplication takes it); the accumulator starts at (0 : λ : 0) with λ fresh per call (Sign: HMAC of K and the fresh bytes, label 'Z'; PublicKey: of the key and fresh bytes), so every field multiplication of k·G takes freshly randomised coordinates, also for a repeated nonce. b itself still changes only with `RefreshBlinding` (a fresh b per signature would cost one more fixed-base multiplication) | `TestBlindedBaseMultMatchesPlain` (equal points, different projective coordinates for different λ, process-wide and fallback blinding), `TestKeyReconstructionHasNoMultiplication` (now also `scalarBaseMultShares`, `scalarBaseMultCanonical`), `TestSignFreshMasks` ('Z' depends on the fresh bytes), compiled-code loop check extended to `scalarBaseMultCanonical` |
@@ -322,15 +323,17 @@ random-vs-random controls stay below 4.5 in at least 9 of 10 runs.
    buffers and zero-allocation signing reduce exposure, but Go may copy
    stack frames (stack growth), and callers' copies of key bytes are
    outside the package's control.
-5. **Fault attacks:** the default deterministic signing is exposed to
-   fault injection (a glitch during signing can leak the key from two
-   signatures over the same digest). Since S-17, Sign stops (panics)
-   when R = k·G is not on the curve and PublicKey rejects an off-curve
-   result, which catches faults in the point computation; a fault in the
-   scalar computation of s is not detected (that would need a second
-   computation or a verification, about +30 µs). `SignHedged` mitigates
-   the differential attack; using it is the caller's or the protocol's
-   decision.
+5. **Fault attacks:** deterministic signing is exposed to fault injection
+   (a glitch during signing can leak the key from two signatures over the
+   same digest). Since S-17/S-18, Sign computes k·G twice with
+   independent randomisers and stops (panics, no signature) if the
+   results differ or are off the curve, and PublicKey rejects an
+   off-curve result; a single transient fault in k·G is therefore
+   detected. A fault in the scalar computation of s, or an identical
+   fault in both computations of k·G, is not detected (a full
+   verification would cost about +30 µs more). `SignHedged` mitigates the
+   differential attack (a fresh nonce per call); using it is the
+   caller's or the protocol's decision.
 6. **Protocol integration is not specified** (contract §7): the transaction
    encoding, chain identifier, domain separation and address text format.
    The library defines none of them.
@@ -367,7 +370,8 @@ random-vs-random controls stay below 4.5 in at least 9 of 10 runs.
   (removing a check or reintroducing a multiplication) were used to
   confirm the tests fail.
 - **Reviewed SHA:** `e9f37bc` (code), with the fixes below on top.
-- **Findings:** S-17 (fault detection, fixed with a regression test). No
+- **Findings:** S-17 (fault detection, fixed with a regression test;
+  completed by S-18 after Codex showed an on-curve fault). No
   new finding on: nonce and key shares (S-10, S-12, S-14, S-15 tests),
   HMAC mask derivations and their dependence on fresh bytes (S-13, 'Z'),
   entropy failure and fallback (`TestBlindingWithoutRandomness`,

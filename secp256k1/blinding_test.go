@@ -365,7 +365,7 @@ func TestSignFreshMasks(t *testing.T) {
 	// Different fresh bytes give different masks for the same K.
 	var k, f1, f2 [32]byte
 	k[0], f2[0] = 1, 1
-	for _, label := range []byte{'K', 'D', 'Z'} {
+	for _, label := range []byte{'K', 'D', 'Z', 'Y'} {
 		a := derivedMaskLimbs(&k, label, &f1)
 		b := derivedMaskLimbs(&k, label, &f2)
 		c := derivedMaskLimbs(&k, label, nil)

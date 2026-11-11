@@ -275,6 +275,9 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 		// multiplication never repeat, even for a repeated nonce.
 		zl := derivedMaskLimbs(&nonces.k, 'Z', &fresh)
 		lambda := projectiveRandomiser(&zl)
+		// Independent randomiser of the second k·G (fault check, S-18).
+		zl = derivedMaskLimbs(&nonces.k, 'Y', &fresh)
+		lambda2 := projectiveRandomiser(&zl)
 		clear(zl[:])
 		// Per-signature inversion blinding rho.
 		rho, _ := derivedBlinding(&nonces.k, 'I', false, &fresh)
@@ -288,12 +291,13 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 		d1.add(&priv.d1, &t)
 		d2.sub(&priv.d2, &t)
 		t.zero()
-		sig, ok := signWithNonce(&d1, &d2, &z, &k1, &k2, &m, &kc2, &lambda, &rho, func() (limbs, point) {
+		sig, ok := signWithNonce(&d1, &d2, &z, &k1, &k2, &m, &kc2, &lambda, &lambda2, &rho, func() (limbs, point) {
 			return derivedBaseBlinding(&nonces.k, 'B', &fresh)
 		})
 		clear(m[:])
 		clear(kc2[:])
 		lambda.v = limbs{}
+		lambda2.v = limbs{}
 		rho.zero()
 		k1.zero()
 		k2.zero()
@@ -309,15 +313,20 @@ func signSecret(priv *PrivateKey, digest *[DigestSize]byte, extra *[ExtraEntropy
 // Montgomery shares k1 + k2 and as the same shares in canonical form
 // c1 + c2 (for k·G). It returns false if r or s is zero (probability
 // about 2^-256), in which case the caller continues with the next nonce.
-func signWithNonce(d1, d2, z, k1, k2 *scalar, c1, c2 *limbs, lambda *fieldElement, rho *scalar, fallback func() (limbs, point)) (Signature, bool) {
-	var R point
+func signWithNonce(d1, d2, z, k1, k2 *scalar, c1, c2 *limbs, lambda, lambda2 *fieldElement, rho *scalar, fallback func() (limbs, point)) (Signature, bool) {
+	// Fault checks (S-17, S-18): a computation error in k·G (for example
+	// an injected fault) gives a wrong R, and a signature from it, paired
+	// with a correct signature over the same digest (deterministic
+	// nonce), can expose the key. k·G is therefore computed twice, with
+	// independent projective randomisers (different intermediate values),
+	// and the results must be the same point and on the curve; otherwise
+	// no signature is released. A valid computation always passes, so
+	// these checks depend only on whether a fault occurred.
+	var R, R2 point
 	R.scalarBaseMultShares(c1, c2, lambda, fallback)
+	R2.scalarBaseMultShares(c1, c2, lambda2, fallback)
+	checkSamePoint(&R, &R2)
 	x, y, _ := R.affine()
-	// Fault check: a computation error in k·G (for example an injected
-	// fault) gives a point off the curve; signing with it could expose the
-	// key when the same digest is also signed correctly (deterministic
-	// nonce). The check costs one squaring pair and a multiplication and
-	// only fails on a fault.
 	checkSigningPoint(&x, &y)
 	xb := x.bytes()
 
@@ -544,8 +553,17 @@ func hmacSHA256(key *[32]byte, parts ...[]byte) [32]byte {
 	return sha256.Sum256(outer[:])
 }
 
-// errFaultDetected is the panic value of checkSigningPoint.
-var errFaultDetected = errors.New("sila/secp256k1: fault detected: k·G is not on the curve; no signature produced")
+// errFaultDetected is the panic value of the signing fault checks.
+var errFaultDetected = errors.New("sila/secp256k1: fault detected in k·G; no signature produced")
+
+// checkSamePoint panics unless p and q are the same point (projective
+// comparison, constant time). Sign compares two independently randomised
+// computations of k·G.
+func checkSamePoint(p, q *point) {
+	if p.equal(q) != 1 {
+		panic(errFaultDetected)
+	}
+}
 
 // checkSigningPoint panics unless (x, y) is on the curve. It is called on
 // R = k·G before r is taken from it: a valid computation always passes,

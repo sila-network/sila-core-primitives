@@ -1,0 +1,129 @@
+# cpu: Intel(R) Xeon(R) Processor @ 2.10GHz; go: go1.25.0 (module toolchain); taskset -c 2; 8 runs
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+BenchmarkSecp256k1/op=sign/impl=sila         	   35336	     33748 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=sign/impl=libsecp256k1 	   41851	     29458 ns/op	     260 B/op	       5 allocs/op
+BenchmarkSecp256k1/op=sign/impl=decred       	   29720	     41828 ns/op	    1592 B/op	      29 allocs/op
+BenchmarkSecp256k1/op=verify/impl=sila       	   20610	     63500 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=libsecp256k1         	   31051	     39601 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=decred               	    7696	    144942 ns/op	    1288 B/op	      23 allocs/op
+BenchmarkSecp256k1/op=recover/impl=sila                	   17587	     70406 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=recover/impl=libsecp256k1        	   24501	     45266 ns/op	      80 B/op	       1 allocs/op
+BenchmarkSecp256k1/op=recover/impl=decred              	    6804	    176530 ns/op	    1368 B/op	      24 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=sila                 	   54831	     23072 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=decred               	   28527	     37000 ns/op	      80 B/op	       1 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+BenchmarkSecp256k1/op=sign/impl=sila         	   30890	     33703 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=sign/impl=libsecp256k1 	   41737	     28309 ns/op	     260 B/op	       5 allocs/op
+BenchmarkSecp256k1/op=sign/impl=decred       	   29424	     41587 ns/op	    1592 B/op	      29 allocs/op
+BenchmarkSecp256k1/op=verify/impl=sila       	   19040	     62254 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=libsecp256k1         	   28542	     39573 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=decred               	    7666	    148701 ns/op	    1288 B/op	      23 allocs/op
+BenchmarkSecp256k1/op=recover/impl=sila                	   15974	     66630 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=recover/impl=libsecp256k1        	   23940	     50589 ns/op	      80 B/op	       1 allocs/op
+BenchmarkSecp256k1/op=recover/impl=decred              	    6871	    179772 ns/op	    1368 B/op	      24 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=sila                 	   52831	     23725 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=decred               	   32464	     36573 ns/op	      80 B/op	       1 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+BenchmarkSecp256k1/op=sign/impl=sila         	   30325	     34654 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=sign/impl=libsecp256k1 	   39861	     29675 ns/op	     260 B/op	       5 allocs/op
+BenchmarkSecp256k1/op=sign/impl=decred       	   28594	     41519 ns/op	    1592 B/op	      29 allocs/op
+BenchmarkSecp256k1/op=verify/impl=sila       	   20593	     59724 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=libsecp256k1         	   33357	     35623 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=decred               	    8934	    136576 ns/op	    1288 B/op	      23 allocs/op
+BenchmarkSecp256k1/op=recover/impl=sila                	   17811	     68200 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=recover/impl=libsecp256k1        	   26934	     44222 ns/op	      80 B/op	       1 allocs/op
+BenchmarkSecp256k1/op=recover/impl=decred              	    6400	    182369 ns/op	    1368 B/op	      24 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=sila                 	   48445	     22503 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=decred               	   33765	     35710 ns/op	      80 B/op	       1 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+BenchmarkSecp256k1/op=sign/impl=sila         	   36123	     32928 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=sign/impl=libsecp256k1 	   43858	     29429 ns/op	     260 B/op	       5 allocs/op
+BenchmarkSecp256k1/op=sign/impl=decred       	   30277	     43105 ns/op	    1592 B/op	      29 allocs/op
+BenchmarkSecp256k1/op=verify/impl=sila       	   18609	     58921 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=libsecp256k1         	   29739	     41070 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=decred               	    7746	    145555 ns/op	    1288 B/op	      23 allocs/op
+BenchmarkSecp256k1/op=recover/impl=sila                	   17372	     70143 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=recover/impl=libsecp256k1        	   28873	     44939 ns/op	      80 B/op	       1 allocs/op
+BenchmarkSecp256k1/op=recover/impl=decred              	    6573	    176017 ns/op	    1368 B/op	      24 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=sila                 	   59980	     21355 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=decred               	   32049	     36739 ns/op	      80 B/op	       1 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+BenchmarkSecp256k1/op=sign/impl=sila         	   36351	     33768 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=sign/impl=libsecp256k1 	   40758	     30047 ns/op	     260 B/op	       5 allocs/op
+BenchmarkSecp256k1/op=sign/impl=decred       	   28885	     41132 ns/op	    1592 B/op	      29 allocs/op
+BenchmarkSecp256k1/op=verify/impl=sila       	   20817	     56804 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=libsecp256k1         	   29626	     39353 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=decred               	    7596	    149021 ns/op	    1288 B/op	      23 allocs/op
+BenchmarkSecp256k1/op=recover/impl=sila                	   16861	     68677 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=recover/impl=libsecp256k1        	   27722	     46996 ns/op	      80 B/op	       1 allocs/op
+BenchmarkSecp256k1/op=recover/impl=decred              	    7744	    173290 ns/op	    1368 B/op	      24 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=sila                 	   53548	     23066 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=decred               	   31850	     35856 ns/op	      80 B/op	       1 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+BenchmarkSecp256k1/op=sign/impl=sila         	   38647	     33058 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=sign/impl=libsecp256k1 	   43256	     28319 ns/op	     260 B/op	       5 allocs/op
+BenchmarkSecp256k1/op=sign/impl=decred       	   26744	     41693 ns/op	    1592 B/op	      29 allocs/op
+BenchmarkSecp256k1/op=verify/impl=sila       	   20064	     58794 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=libsecp256k1         	   31095	     40474 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=decred               	    7569	    144904 ns/op	    1288 B/op	      23 allocs/op
+BenchmarkSecp256k1/op=recover/impl=sila                	   17235	     69462 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=recover/impl=libsecp256k1        	   22504	     45796 ns/op	      80 B/op	       1 allocs/op
+BenchmarkSecp256k1/op=recover/impl=decred              	    6432	    171219 ns/op	    1368 B/op	      24 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=sila                 	   50589	     21769 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=decred               	   33745	     36990 ns/op	      80 B/op	       1 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+BenchmarkSecp256k1/op=sign/impl=sila         	   32521	     33131 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=sign/impl=libsecp256k1 	   43999	     30904 ns/op	     260 B/op	       5 allocs/op
+BenchmarkSecp256k1/op=sign/impl=decred       	   27351	     40334 ns/op	    1592 B/op	      29 allocs/op
+BenchmarkSecp256k1/op=verify/impl=sila       	   21072	     60618 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=libsecp256k1         	   29964	     42050 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=decred               	    7629	    144001 ns/op	    1288 B/op	      23 allocs/op
+BenchmarkSecp256k1/op=recover/impl=sila                	   19347	     67854 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=recover/impl=libsecp256k1        	   28239	     49711 ns/op	      80 B/op	       1 allocs/op
+BenchmarkSecp256k1/op=recover/impl=decred              	    6594	    175448 ns/op	    1368 B/op	      24 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=sila                 	   50552	     22813 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=decred               	   32964	     36349 ns/op	      80 B/op	       1 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/sila-network/sila-core-primitives/benchmarks/geth-compare
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+BenchmarkSecp256k1/op=sign/impl=sila         	   36176	     33398 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=sign/impl=libsecp256k1 	   44064	     29321 ns/op	     260 B/op	       5 allocs/op
+BenchmarkSecp256k1/op=sign/impl=decred       	   29912	     40918 ns/op	    1592 B/op	      29 allocs/op
+BenchmarkSecp256k1/op=verify/impl=sila       	   20826	     52801 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=libsecp256k1         	   30564	     39406 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=verify/impl=decred               	    7846	    132252 ns/op	    1288 B/op	      23 allocs/op
+BenchmarkSecp256k1/op=recover/impl=sila                	   17864	     69706 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=recover/impl=libsecp256k1        	   26983	     47050 ns/op	      80 B/op	       1 allocs/op
+BenchmarkSecp256k1/op=recover/impl=decred              	    6865	    176365 ns/op	    1368 B/op	      24 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=sila                 	   51482	     24446 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSecp256k1/op=pubkey/impl=decred               	   33367	     35781 ns/op	      80 B/op	       1 allocs/op
+PASS

@@ -1,0 +1,233 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ahmed Ibrahim
+
+package secp256k1
+
+// Side-channel blinding for the secret-dependent computations (finding
+// S-8 in docs/SECP256K1-SECURITY-REVIEW.md).
+//
+// The constant-time code has no secret-dependent branch or memory access
+// (checked on the compiled code), but processors may still take slightly
+// different time depending on the operand VALUES (data-dependent
+// instruction timing, which Arm only rules out under PSTATE.DIT and x86
+// only under DOIT). Blinding makes the operands that reach the arithmetic
+// statistically independent of the secret, whatever the processor does:
+//
+//   - k·G (and d·G) is computed as (k + b)·G + (−b·G) for a secret,
+//     uniformly random b: the digits processed by the fixed-base
+//     multiplication are those of k + b, which is uniform for every k.
+//     b and −b·G are generated once from crypto/rand (lazily, like a
+//     randomized context in other libraries) and can be refreshed with
+//     RefreshBlinding.
+//   - the nonce is created as shares k = k1 + k2 (canonical domain, no
+//     multiplication); k⁻¹·e is computed as (k1·ρ + k2·ρ)⁻¹·(ρ·e) for a
+//     per-signature secret ρ derived from the RFC 6979 state, so neither k
+//     nor k⁻¹ is ever a multiplication operand;
+//   - the private key is stored as shares d = d1 + d2 (privatekey.go).
+//
+// Neither changes any result: (k + b)·G − b·G = k·G and (k·ρ)⁻¹·ρ = k⁻¹,
+// so signatures stay byte-identical to deterministic RFC 6979.
+
+import (
+	cryptorand "crypto/rand"
+	"errors"
+	"io"
+	"sync/atomic"
+)
+
+// baseBlinding holds a secret value b (canonical, in [1, n-1]) and the
+// point −b·G.
+type baseBlinding struct {
+	b    limbs
+	negB point
+}
+
+var blindingState atomic.Pointer[baseBlinding]
+
+// randomSource is the randomness used for the process-wide blinding and
+// for private-key masks. It is crypto/rand.Reader; tests replace it to
+// exercise the failure paths.
+var randomSource io.Reader = cryptorand.Reader
+
+// maxBlindingDraws bounds the rejection sampling in newBaseBlinding: a
+// healthy source needs more than one draw with probability about 2^-128,
+// so hitting the bound means the source is broken (for example it returns
+// only zeros) and an error is better than looping forever.
+const maxBlindingDraws = 64
+
+// newBaseBlinding draws b uniformly from [1, n-1] by rejection sampling
+// and computes −b·G (constant time).
+func newBaseBlinding(rand io.Reader) (*baseBlinding, error) {
+	var buf [32]byte
+	defer clear(buf[:])
+	bl := new(baseBlinding)
+	for i := 0; ; i++ {
+		if i == maxBlindingDraws {
+			return nil, errBadRandomness
+		}
+		if _, err := io.ReadFull(rand, buf[:]); err != nil {
+			return nil, err
+		}
+		bl.b = limbsFromBytes(&buf)
+		if lessThan(&bl.b, &scalarN.m)&(1^isZeroLimbs(&bl.b)) == 1 {
+			break
+		}
+	}
+	one := fieldFromUint(1)
+	var bG point
+	bG.scalarBaseMultCanonical(&bl.b, &one)
+	bl.negB.neg(&bG)
+	return bl, nil
+}
+
+var errBadRandomness = errors.New("sila/secp256k1: random source produced no valid blinding value")
+
+// RefreshBlinding replaces the secret blinding value used by signing and
+// public-key derivation with a fresh one read from rand
+// (crypto/rand.Reader when rand is nil). It never changes any result.
+// Long-running signers may call it periodically (it costs one fixed-base
+// multiplication); it is safe for concurrent use. rand must be a
+// cryptographically secure source: a predictable value would void the
+// protection (never correctness). On error the current blinding is kept.
+func RefreshBlinding(rand io.Reader) error {
+	if rand == nil {
+		rand = randomSource
+	}
+	bl, err := newBaseBlinding(rand)
+	if err != nil {
+		return err
+	}
+	blindingState.Store(bl)
+	return nil
+}
+
+// currentBlinding returns the process-wide blinding, creating it from the
+// random source on first use. If the source fails, it returns nil and the
+// caller uses a per-call blinding derived from its own secret (never an
+// unblinded computation); creation is attempted again on the next call,
+// so a transient failure does not disable the process-wide blinding.
+func currentBlinding() *baseBlinding {
+	if bl := blindingState.Load(); bl != nil {
+		return bl
+	}
+	if bl, err := newBaseBlinding(randomSource); err == nil {
+		blindingState.CompareAndSwap(nil, bl)
+	}
+	return blindingState.Load()
+}
+
+// scalarBaseMultShares sets r = (c1 + c2)·G for a secret given as two
+// canonical shares. With the secret blinding b (process-wide, or the
+// fallback when no process-wide blinding exists) it computes
+// ((c1 + b) + c2)·G + (−b·G): the sum is formed with modular additions
+// only (no multiplication takes it as an operand), and the fixed-base
+// multiplication runs with the projective randomiser lambda (fresh per
+// call; see scalarBaseMultCanonical), so its field multiplications do
+// not repeat across calls even when c1 + c2 and b do. Constant time.
+func (r *point) scalarBaseMultShares(c1, c2 *limbs, lambda *fieldElement, fallback func() (limbs, point)) *point {
+	var b limbs
+	var negB point
+	if bl := currentBlinding(); bl != nil {
+		b, negB = bl.b, bl.negB
+	} else {
+		b, negB = fallback()
+	}
+	var t limbs
+	scalarN.add(&t, c1, &b)
+	scalarN.add(&t, &t, c2)
+	r.scalarBaseMultCanonical(&t, lambda)
+	r.add(r, &negB)
+	clear(t[:])
+	clear(b[:])
+	return r
+}
+
+// projectiveRandomiser returns the field element m (a secret mask below n,
+// hence below p) or 1 when m = 0, in constant time.
+func projectiveRandomiser(m *limbs) fieldElement {
+	var f fieldElement
+	f.v = *m
+	one := fieldFromUint(1)
+	f.selectFrom(&one, &f, f.isZero())
+	return f
+}
+
+// invMaskedShares sets z = (k·rho)⁻¹ for a secret k given as shares
+// k = k1 + k2 and a secret, non-zero rho: it computes t = k1·rho + k2·rho
+// (multiplications of pseudo-random shares) and inverts t, which is
+// uniformly distributed for every k. k itself is never a multiplication
+// operand. Multiplying the result by rho gives k⁻¹ (constant time).
+func (z *scalar) invMaskedShares(k1, k2, rho *scalar) *scalar {
+	var t, u scalar
+	t.mul(k1, rho)
+	u.mul(k2, rho)
+	t.add(&t, &u)
+	z.inv(&t)
+	t.zero()
+	u.zero()
+	return z
+}
+
+// derivedMaskLimbs returns a secret mask in [0, n), canonical limbs,
+// derived from a 32-byte secret seed with a domain-separated HMAC-SHA-256
+// (no multiplication).
+//
+// fresh, when not nil, is mixed into the HMAC message: the per-signature
+// random bytes that make the masks of repeated signatures over the same
+// key and digest independent (findings S-12, S-13).
+func derivedMaskLimbs(seed *[32]byte, label byte, fresh *[32]byte) limbs {
+	in := [1]byte{label}
+	var fr []byte
+	if fresh != nil {
+		fr = fresh[:]
+	}
+	h := hmacSHA256(seed, []byte("SILA-secp256k1-mask"), in[:], fr)
+	m := limbsFromBytes(&h)
+	scalarN.reduceOnce(&m, &m, 0) // any 256-bit value is < 2n
+	clear(h[:])
+	return m
+}
+
+// derivedBlinding returns a secret scalar in [1, n-1] and, if withPoint,
+// −scalar·G, derived from a 32-byte secret seed with a domain-separated
+// HMAC-SHA-256. It is the fallback when crypto/rand is unavailable and the
+// source of the per-signature inversion blinding.
+//
+// fresh, when not nil, is mixed into the HMAC message (see
+// derivedMaskLimbs).
+func derivedBlinding(seed *[32]byte, label byte, withPoint bool, fresh *[32]byte) (scalar, point) {
+	var s scalar
+	var negP point
+	in := [1]byte{label}
+	var fr []byte
+	if fresh != nil {
+		fr = fresh[:]
+	}
+	h := hmacSHA256(seed, []byte("SILA-secp256k1-blinding"), in[:], fr)
+	for ctr := byte(0); ; ctr++ {
+		if s.setBytesCanonical(&h)&(1^s.isZero()) == 1 {
+			break
+		}
+		// Probability about 2^-128: derive again.
+		c := [1]byte{ctr}
+		h = hmacSHA256(seed, h[:], c[:])
+	}
+	clear(h[:])
+	if withPoint {
+		var p point
+		p.scalarBaseMult(&s)
+		negP.neg(&p)
+	}
+	return s, negP
+}
+
+// derivedBaseBlinding returns a secret canonical value b in [1, n-1] and
+// −b·G, derived like derivedBlinding (same HMAC input, so the same value);
+// it is the fallback of scalarBaseMultShares when the process-wide
+// blinding cannot be created.
+func derivedBaseBlinding(seed *[32]byte, label byte, fresh *[32]byte) (limbs, point) {
+	s, negP := derivedBlinding(seed, label, true, fresh)
+	c := s.canonical()
+	s.zero()
+	return c, negP
+}

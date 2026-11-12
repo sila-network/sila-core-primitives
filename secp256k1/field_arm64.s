@@ -1,0 +1,854 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ahmed Ibrahim
+
+//go:build arm64 && !purego
+
+#include "textflag.h"
+
+// Field multiplication and squaring modulo p = 2^256 - 2^32 - 977 and
+// scalar Montgomery multiplication modulo the group order n, for arm64.
+// Same algorithms as the portable Go code (mulWords + reduceWords /
+// montReduceN): the 512-bit product is formed row by row with MUL/UMULH
+// and ADDS/ADCS carry chains (which the Go compiler cannot keep in the
+// flags), then reduced; the final selections use CSEL.
+//
+// Constant time: straight-line code (no branch at all), every memory
+// access at a fixed offset from an argument pointer, and only MUL, UMULH,
+// ADDS/ADCS/ADC, SUBS/SBCS, CSEL, MOVD, LDP/STP — instructions with data-
+// independent timing under PSTATE.DIT (Arm DIT list), which Sign and
+// PublicKey enable on processors with FEAT_DIT (Go >= 1.24). All inputs
+// are loaded before any output is stored, so z may alias x or y.
+// The 512-bit product is formed from four independent 2x2-word products
+// (x_lo·y_lo, x_hi·y_hi, x_lo·y_hi, x_hi·y_lo), whose carry chains do not
+// depend on each other, then summed. The square computes the six cross
+// products once, doubles them and adds the four squares (20 instead of
+// 32 MUL/UMULH); a lo^2/hi^2/lo·hi split of the square measured slower.
+//
+// Registers: R3..R6 = x, R7..R10 = y (then n and m in the reduction),
+// R11..R17, R19, R20 = t0..t8, R20..R24 the middle sum and temporaries,
+// R0..R2 and R25 scratch during the product (the output pointer is
+// reloaded from the frame), R25 then the reduction constant.
+// R18 (platform), R26..R30 are not used.
+
+// func fieldMul(z, x, y *limbs)
+TEXT ·fieldMul(SB), NOSPLIT, $0-24
+	MOVD x+8(FP), R1
+	MOVD y+16(FP), R2
+	LDP (R1), (R3, R4)
+	LDP 16(R1), (R5, R6)
+	LDP (R2), (R7, R8)
+	LDP 16(R2), (R9, R10)
+	// LL = x_lo·y_lo -> t0..t3, HH = x_hi·y_hi -> t4..t7.
+	MUL R7, R3, R11
+	UMULH R7, R3, R0
+	MUL R8, R3, R1
+	UMULH R8, R3, R2
+	MUL R8, R4, R13
+	UMULH R8, R4, R14
+	ADDS R1, R0, R12
+	ADCS R2, R13, R13
+	ADC ZR, R14, R14
+	MUL R7, R4, R1
+	UMULH R7, R4, R2
+	ADDS R1, R12, R12
+	ADCS R2, R13, R13
+	ADC ZR, R14, R14
+	MUL R9, R5, R15
+	UMULH R9, R5, R25
+	MUL R10, R5, R24
+	UMULH R10, R5, R0
+	MUL R10, R6, R17
+	UMULH R10, R6, R19
+	ADDS R24, R25, R16
+	ADCS R0, R17, R17
+	ADC ZR, R19, R19
+	MUL R9, R6, R24
+	UMULH R9, R6, R0
+	ADDS R24, R16, R16
+	ADCS R0, R17, R17
+	ADC ZR, R19, R19
+	// M = x_lo·y_hi + x_hi·y_lo (five words).
+	MUL R9, R3, R20
+	UMULH R9, R3, R0
+	MUL R10, R3, R1
+	UMULH R10, R3, R2
+	MUL R10, R4, R22
+	UMULH R10, R4, R23
+	ADDS R1, R0, R21
+	ADCS R2, R22, R22
+	ADC ZR, R23, R23
+	MUL R9, R4, R1
+	UMULH R9, R4, R2
+	ADDS R1, R21, R21
+	ADCS R2, R22, R22
+	ADC ZR, R23, R23
+	MUL R7, R5, R3
+	UMULH R7, R5, R0
+	MUL R8, R5, R1
+	UMULH R8, R5, R2
+	MUL R8, R6, R9
+	UMULH R8, R6, R10
+	ADDS R1, R0, R4
+	ADCS R2, R9, R9
+	ADC ZR, R10, R10
+	MUL R7, R6, R1
+	UMULH R7, R6, R2
+	ADDS R1, R4, R4
+	ADCS R2, R9, R9
+	ADC ZR, R10, R10
+	ADDS R3, R20, R20
+	ADCS R4, R21, R21
+	ADCS R9, R22, R22
+	ADCS R10, R23, R23
+	ADC ZR, ZR, R24
+	// t2..t7 += M.
+	ADDS R20, R13, R13
+	ADCS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADC ZR, R19, R19
+	// Reduction modulo p: fold t4..t7 with 2^256 ≡ c = 0x1000003D1; the top
+	// word r4 < 2^34 goes to t8.
+	MOVD $0x1000003D1, R25
+	MUL R25, R15, R21
+	MUL R25, R16, R22
+	MUL R25, R17, R23
+	MUL R25, R19, R24
+	ADDS R21, R11, R11
+	ADCS R22, R12, R12
+	ADCS R23, R13, R13
+	ADCS R24, R14, R14
+	ADC ZR, ZR, R20
+	UMULH R25, R15, R21
+	UMULH R25, R16, R22
+	UMULH R25, R17, R23
+	UMULH R25, R19, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADC R24, R20, R20
+	// Second fold and final correction, as two independent sums:
+	// v = t + r4·c and u = t + (r4 + 1)·c = v + c, with r4 < 2^34.
+	// v < 2^256 + 2^68, so v >= p exactly when u >= 2^256 (u carries
+	// out of four words), and then v - p = u mod 2^256 < p; otherwise
+	// v < p and the result is v.
+	ADD $1, R20, R0
+	MUL R25, R20, R1
+	UMULH R25, R20, R2
+	MUL R25, R0, R7
+	UMULH R25, R0, R8
+	ADDS R1, R11, R9
+	ADCS R2, R12, R10
+	ADCS ZR, R13, R1
+	ADC ZR, R14, R2
+	ADDS R7, R11, R21
+	ADCS R8, R12, R22
+	ADCS ZR, R13, R23
+	ADCS ZR, R14, R24
+	CSEL CS, R21, R9, R11
+	CSEL CS, R22, R10, R12
+	CSEL CS, R23, R1, R13
+	CSEL CS, R24, R2, R14
+	MOVD z+0(FP), R0
+	STP (R11, R12), (R0)
+	STP (R13, R14), 16(R0)
+	RET
+
+// func fieldSqr(z, x *limbs)
+TEXT ·fieldSqr(SB), NOSPLIT, $0-16
+	MOVD x+8(FP), R1
+	LDP (R1), (R3, R4)
+	LDP 16(R1), (R5, R6)
+	// Cross products x0·x1, x0·x2, x0·x3 at words 1..4.
+	MUL R4, R3, R12
+	UMULH R4, R3, R7
+	MUL R5, R3, R8
+	UMULH R5, R3, R9
+	MUL R6, R3, R10
+	UMULH R6, R3, R21
+	ADDS R8, R7, R13
+	ADCS R10, R9, R14
+	ADC ZR, R21, R15
+	// x1·x2 at words 3..4, x1·x3 at 4..5, x2·x3 at 5..6.
+	MUL R5, R4, R7
+	UMULH R5, R4, R8
+	MUL R6, R4, R9
+	UMULH R6, R4, R10
+	MUL R6, R5, R21
+	UMULH R6, R5, R22
+	ADDS R7, R14, R14
+	ADCS R8, R15, R15
+	ADC ZR, ZR, R16
+	ADDS R9, R15, R15
+	ADCS R10, R16, R16
+	ADC ZR, ZR, R17
+	ADDS R21, R16, R16
+	ADC R22, R17, R17
+	// Double the cross products (t7 receives the top bit).
+	ADDS R12, R12, R12
+	ADCS R13, R13, R13
+	ADCS R14, R14, R14
+	ADCS R15, R15, R15
+	ADCS R16, R16, R16
+	ADCS R17, R17, R17
+	ADC ZR, ZR, R19
+	// Add the squares x_i^2 at words 2i, 2i+1.
+	MUL R3, R3, R11
+	UMULH R3, R3, R7
+	MUL R4, R4, R8
+	UMULH R4, R4, R9
+	MUL R5, R5, R10
+	UMULH R5, R5, R21
+	MUL R6, R6, R22
+	UMULH R6, R6, R23
+	ADDS R7, R12, R12
+	ADCS R8, R13, R13
+	ADCS R9, R14, R14
+	ADCS R10, R15, R15
+	ADCS R21, R16, R16
+	ADCS R22, R17, R17
+	ADC R23, R19, R19
+	// Reduction modulo p: fold t4..t7 with 2^256 ≡ c = 0x1000003D1; the top
+	// word r4 < 2^34 goes to t8.
+	MOVD $0x1000003D1, R25
+	MUL R25, R15, R21
+	MUL R25, R16, R22
+	MUL R25, R17, R23
+	MUL R25, R19, R24
+	ADDS R21, R11, R11
+	ADCS R22, R12, R12
+	ADCS R23, R13, R13
+	ADCS R24, R14, R14
+	ADC ZR, ZR, R20
+	UMULH R25, R15, R21
+	UMULH R25, R16, R22
+	UMULH R25, R17, R23
+	UMULH R25, R19, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADC R24, R20, R20
+	// Second fold and final correction, as two independent sums:
+	// v = t + r4·c and u = t + (r4 + 1)·c = v + c, with r4 < 2^34.
+	// v < 2^256 + 2^68, so v >= p exactly when u >= 2^256 (u carries
+	// out of four words), and then v - p = u mod 2^256 < p; otherwise
+	// v < p and the result is v.
+	ADD $1, R20, R0
+	MUL R25, R20, R1
+	UMULH R25, R20, R2
+	MUL R25, R0, R7
+	UMULH R25, R0, R8
+	ADDS R1, R11, R9
+	ADCS R2, R12, R10
+	ADCS ZR, R13, R1
+	ADC ZR, R14, R2
+	ADDS R7, R11, R21
+	ADCS R8, R12, R22
+	ADCS ZR, R13, R23
+	ADCS ZR, R14, R24
+	CSEL CS, R21, R9, R11
+	CSEL CS, R22, R10, R12
+	CSEL CS, R23, R1, R13
+	CSEL CS, R24, R2, R14
+	MOVD z+0(FP), R0
+	STP (R11, R12), (R0)
+	STP (R13, R14), 16(R0)
+	RET
+
+// func scalarMul(z, x, y, n *limbs)
+TEXT ·scalarMul(SB), NOSPLIT, $0-32
+	MOVD x+8(FP), R1
+	MOVD y+16(FP), R2
+	LDP (R1), (R3, R4)
+	LDP 16(R1), (R5, R6)
+	LDP (R2), (R7, R8)
+	LDP 16(R2), (R9, R10)
+	// LL = x_lo·y_lo -> t0..t3, HH = x_hi·y_hi -> t4..t7.
+	MUL R7, R3, R11
+	UMULH R7, R3, R0
+	MUL R8, R3, R1
+	UMULH R8, R3, R2
+	MUL R8, R4, R13
+	UMULH R8, R4, R14
+	ADDS R1, R0, R12
+	ADCS R2, R13, R13
+	ADC ZR, R14, R14
+	MUL R7, R4, R1
+	UMULH R7, R4, R2
+	ADDS R1, R12, R12
+	ADCS R2, R13, R13
+	ADC ZR, R14, R14
+	MUL R9, R5, R15
+	UMULH R9, R5, R25
+	MUL R10, R5, R24
+	UMULH R10, R5, R0
+	MUL R10, R6, R17
+	UMULH R10, R6, R19
+	ADDS R24, R25, R16
+	ADCS R0, R17, R17
+	ADC ZR, R19, R19
+	MUL R9, R6, R24
+	UMULH R9, R6, R0
+	ADDS R24, R16, R16
+	ADCS R0, R17, R17
+	ADC ZR, R19, R19
+	// M = x_lo·y_hi + x_hi·y_lo (five words).
+	MUL R9, R3, R20
+	UMULH R9, R3, R0
+	MUL R10, R3, R1
+	UMULH R10, R3, R2
+	MUL R10, R4, R22
+	UMULH R10, R4, R23
+	ADDS R1, R0, R21
+	ADCS R2, R22, R22
+	ADC ZR, R23, R23
+	MUL R9, R4, R1
+	UMULH R9, R4, R2
+	ADDS R1, R21, R21
+	ADCS R2, R22, R22
+	ADC ZR, R23, R23
+	MUL R7, R5, R3
+	UMULH R7, R5, R0
+	MUL R8, R5, R1
+	UMULH R8, R5, R2
+	MUL R8, R6, R9
+	UMULH R8, R6, R10
+	ADDS R1, R0, R4
+	ADCS R2, R9, R9
+	ADC ZR, R10, R10
+	MUL R7, R6, R1
+	UMULH R7, R6, R2
+	ADDS R1, R4, R4
+	ADCS R2, R9, R9
+	ADC ZR, R10, R10
+	ADDS R3, R20, R20
+	ADCS R4, R21, R21
+	ADCS R9, R22, R22
+	ADCS R10, R23, R23
+	ADC ZR, ZR, R24
+	// t2..t7 += M.
+	ADDS R20, R13, R13
+	ADCS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADC ZR, R19, R19
+	// Montgomery reduction modulo n: four rows m = t_i·(-n^-1) mod 2^64,
+	// t += m·n·2^(64i); t8 collects the top carries.
+	MOVD n+24(FP), R2
+	LDP (R2), (R3, R4)
+	LDP 16(R2), (R5, R6)
+	MOVD $0x4B0DFF665588B13F, R25
+	MOVD ZR, R20
+	// Row 0.
+	MUL R25, R11, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R11, R11
+	ADCS R22, R12, R12
+	ADCS R23, R13, R13
+	ADCS R24, R14, R14
+	ADCS ZR, R15, R15
+	ADCS ZR, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADCS R24, R15, R15
+	ADCS ZR, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	// Row 1.
+	MUL R25, R12, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADCS R24, R15, R15
+	ADCS ZR, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADCS R24, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	// Row 2.
+	MUL R25, R13, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADCS R24, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	// Row 3.
+	MUL R25, R14, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R15, R15
+	ADCS R22, R16, R16
+	ADCS R23, R17, R17
+	ADCS R24, R19, R19
+	ADC ZR, R20, R20
+	// The result t8·2^256 + t4..t7 is below 2n: subtract n unless that
+	// borrows (CS after SBCS means no borrow).
+	SUBS R3, R15, R21
+	SBCS R4, R16, R22
+	SBCS R5, R17, R23
+	SBCS R6, R19, R24
+	SBCS ZR, R20, R7
+	CSEL CS, R21, R15, R15
+	CSEL CS, R22, R16, R16
+	CSEL CS, R23, R17, R17
+	CSEL CS, R24, R19, R19
+	MOVD z+0(FP), R0
+	STP (R15, R16), (R0)
+	STP (R17, R19), 16(R0)
+	RET
+
+// func scalarSqr(z, x, n *limbs)
+TEXT ·scalarSqr(SB), NOSPLIT, $0-24
+	MOVD x+8(FP), R1
+	LDP (R1), (R3, R4)
+	LDP 16(R1), (R5, R6)
+	// Cross products x0·x1, x0·x2, x0·x3 at words 1..4.
+	MUL R4, R3, R12
+	UMULH R4, R3, R7
+	MUL R5, R3, R8
+	UMULH R5, R3, R9
+	MUL R6, R3, R10
+	UMULH R6, R3, R21
+	ADDS R8, R7, R13
+	ADCS R10, R9, R14
+	ADC ZR, R21, R15
+	// x1·x2 at words 3..4, x1·x3 at 4..5, x2·x3 at 5..6.
+	MUL R5, R4, R7
+	UMULH R5, R4, R8
+	MUL R6, R4, R9
+	UMULH R6, R4, R10
+	MUL R6, R5, R21
+	UMULH R6, R5, R22
+	ADDS R7, R14, R14
+	ADCS R8, R15, R15
+	ADC ZR, ZR, R16
+	ADDS R9, R15, R15
+	ADCS R10, R16, R16
+	ADC ZR, ZR, R17
+	ADDS R21, R16, R16
+	ADC R22, R17, R17
+	// Double the cross products (t7 receives the top bit).
+	ADDS R12, R12, R12
+	ADCS R13, R13, R13
+	ADCS R14, R14, R14
+	ADCS R15, R15, R15
+	ADCS R16, R16, R16
+	ADCS R17, R17, R17
+	ADC ZR, ZR, R19
+	// Add the squares x_i^2 at words 2i, 2i+1.
+	MUL R3, R3, R11
+	UMULH R3, R3, R7
+	MUL R4, R4, R8
+	UMULH R4, R4, R9
+	MUL R5, R5, R10
+	UMULH R5, R5, R21
+	MUL R6, R6, R22
+	UMULH R6, R6, R23
+	ADDS R7, R12, R12
+	ADCS R8, R13, R13
+	ADCS R9, R14, R14
+	ADCS R10, R15, R15
+	ADCS R21, R16, R16
+	ADCS R22, R17, R17
+	ADC R23, R19, R19
+	// Montgomery reduction modulo n: four rows m = t_i·(-n^-1) mod 2^64,
+	// t += m·n·2^(64i); t8 collects the top carries.
+	MOVD n+16(FP), R2
+	LDP (R2), (R3, R4)
+	LDP 16(R2), (R5, R6)
+	MOVD $0x4B0DFF665588B13F, R25
+	MOVD ZR, R20
+	// Row 0.
+	MUL R25, R11, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R11, R11
+	ADCS R22, R12, R12
+	ADCS R23, R13, R13
+	ADCS R24, R14, R14
+	ADCS ZR, R15, R15
+	ADCS ZR, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADCS R24, R15, R15
+	ADCS ZR, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	// Row 1.
+	MUL R25, R12, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R12, R12
+	ADCS R22, R13, R13
+	ADCS R23, R14, R14
+	ADCS R24, R15, R15
+	ADCS ZR, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADCS R24, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	// Row 2.
+	MUL R25, R13, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R13, R13
+	ADCS R22, R14, R14
+	ADCS R23, R15, R15
+	ADCS R24, R16, R16
+	ADCS ZR, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	// Row 3.
+	MUL R25, R14, R7
+	MUL R3, R7, R21
+	MUL R4, R7, R22
+	MUL R5, R7, R23
+	MUL R6, R7, R24
+	ADDS R21, R14, R14
+	ADCS R22, R15, R15
+	ADCS R23, R16, R16
+	ADCS R24, R17, R17
+	ADCS ZR, R19, R19
+	ADC ZR, R20, R20
+	UMULH R3, R7, R21
+	UMULH R4, R7, R22
+	UMULH R5, R7, R23
+	UMULH R6, R7, R24
+	ADDS R21, R15, R15
+	ADCS R22, R16, R16
+	ADCS R23, R17, R17
+	ADCS R24, R19, R19
+	ADC ZR, R20, R20
+	// The result t8·2^256 + t4..t7 is below 2n: subtract n unless that
+	// borrows (CS after SBCS means no borrow).
+	SUBS R3, R15, R21
+	SBCS R4, R16, R22
+	SBCS R5, R17, R23
+	SBCS R6, R19, R24
+	SBCS ZR, R20, R7
+	CSEL CS, R21, R15, R15
+	CSEL CS, R22, R16, R16
+	CSEL CS, R23, R17, R17
+	CSEL CS, R24, R19, R19
+	MOVD z+0(FP), R0
+	STP (R15, R16), (R0)
+	STP (R17, R19), 16(R0)
+	RET
+
+// func lookupAffineNEON(r *affinePoint, table *[baseEntries]affinePoint, idx uint64)
+//
+// r = table[idx-1] for 1 <= idx <= 16, reading all 16 entries of 64 bytes
+// (x then y): every entry is loaded and AND-ed with an equality mask
+// (VCMEQ of the broadcast index with the entry number), then OR-ed into
+// the result. Fully unrolled, no branch, every address independent of
+// idx. Only VLD1/VST1, VDUP, VCMEQ, VAND, VORR, VEOR and MOVD.
+TEXT ·lookupAffineNEON(SB), NOSPLIT, $0-24
+	MOVD table+8(FP), R1
+	MOVD idx+16(FP), R2
+	VDUP R2, V31.D2
+	VEOR V0.B16, V0.B16, V0.B16
+	VEOR V1.B16, V1.B16, V1.B16
+	VEOR V2.B16, V2.B16, V2.B16
+	VEOR V3.B16, V3.B16, V3.B16
+	// entry 0 (magnitude 1)
+	MOVD $1, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 1 (magnitude 2)
+	MOVD $2, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 2 (magnitude 3)
+	MOVD $3, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 3 (magnitude 4)
+	MOVD $4, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 4 (magnitude 5)
+	MOVD $5, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 5 (magnitude 6)
+	MOVD $6, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 6 (magnitude 7)
+	MOVD $7, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 7 (magnitude 8)
+	MOVD $8, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 8 (magnitude 9)
+	MOVD $9, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 9 (magnitude 10)
+	MOVD $10, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 10 (magnitude 11)
+	MOVD $11, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 11 (magnitude 12)
+	MOVD $12, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 12 (magnitude 13)
+	MOVD $13, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 13 (magnitude 14)
+	MOVD $14, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 14 (magnitude 15)
+	MOVD $15, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	// entry 15 (magnitude 16)
+	MOVD $16, R3
+	VDUP R3, V30.D2
+	VCMEQ V31.D2, V30.D2, V30.D2
+	VLD1.P 64(R1), [V4.B16, V5.B16, V6.B16, V7.B16]
+	VAND V30.B16, V4.B16, V4.B16
+	VORR V4.B16, V0.B16, V0.B16
+	VAND V30.B16, V5.B16, V5.B16
+	VORR V5.B16, V1.B16, V1.B16
+	VAND V30.B16, V6.B16, V6.B16
+	VORR V6.B16, V2.B16, V2.B16
+	VAND V30.B16, V7.B16, V7.B16
+	VORR V7.B16, V3.B16, V3.B16
+	MOVD r+0(FP), R0
+	VST1 [V0.B16, V1.B16, V2.B16, V3.B16], (R0)
+	RET

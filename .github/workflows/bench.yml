@@ -14,6 +14,7 @@ on:
   pull_request:
     paths:
       - "keccak/**"
+      - "secp256k1/**"
       - "internal/gen/**"
       - "benchmarks/**"
       - ".github/workflows/bench.yml"
@@ -60,6 +61,35 @@ jobs:
           if [ "$(go env GOARCH)" = "amd64" ]; then modes="asm noavx purego"; else modes="asm"; fi
           echo "modes: $modes"
           for m in $modes; do ./run.sh "$m"; done
+
+      - name: secp256k1 (SILA vs libsecp256k1 via cgo vs decred)
+        run: |
+          go test -c -o "$RUNNER_TEMP/secp.test" .
+          for i in 1 2 3 4 5 6; do
+            "$RUNNER_TEMP/secp.test" -test.run '^$' -test.bench 'Secp256k1' -test.benchmem -test.cpu 1 -test.benchtime 200ms
+          done | tee "$RESULTS/secp256k1.txt"
+          {
+            echo
+            echo "### secp256k1"
+            echo
+            echo '```'
+            "$(go env GOPATH)/bin/benchstat" -col /impl -row /op -filter '.unit:(sec/op)' "$RESULTS/secp256k1.txt"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: secp256k1 building blocks (in-package)
+        working-directory: secp256k1
+        run: |
+          go test -run '^$' -bench '^Benchmark(Sign|Verify|Recover|PublicKey|FieldMul|FieldSquare|FieldInv|FieldInvVartime|ScalarInv|ScalarInvVartime|ScalarBaseMult)$' \
+            -benchmem -count 6 -benchtime 200ms . | tee "$RESULTS/secp256k1-blocks.txt"
+          {
+            echo
+            echo "### secp256k1 building blocks"
+            echo
+            echo '```'
+            "$(go env GOPATH)/bin/benchstat" -filter '.unit:(sec/op)' "$RESULTS/secp256k1-blocks.txt"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Portable kernel variants (mem vs locals)
         working-directory: keccak

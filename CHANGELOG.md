@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased — secp256k1 (development, `dev/secp256k1-v0.1`)
+
+Second core primitive; not released. See `secp256k1/README.md`.
+
+- Constant-time field, scalar and group arithmetic (no `math/big`):
+  fused row-wise field multiplication with a dedicated reduction for p,
+  unrolled Montgomery arithmetic for n, inversion and square root by fixed
+  addition chains, complete addition formulas (incl. mixed addition),
+  signed radix-32 base table with full-table scans.
+- Private keys, RFC 6979 deterministic low-S ECDSA (default), a separate
+  hedged API (`SignWithExtraEntropy`, `SignHedged`), strict verification,
+  public-key recovery (v in 0..3), strict and recovery-compatible
+  (high-S) parsers, `Normalize`.
+- New packages: `account` (20-byte address = last 20 bytes of SILA
+  Keccak-256 of X || Y) and `txsig` (strict and recovery-compatible value
+  rules, 27/28 and chain-bound recovery values with the chain identifier
+  as a parameter, 64-byte compact form with y-parity).
+- Public-input path (Verify, Recover): Jacobian formulas, GLV
+  endomorphism, wNAF tables; confined to `vartime.go`.
+- Evidence: parity matrix against go-ethereum v1.17.10 (libsecp256k1) and
+  decred (`docs/SECP256K1-PARITY.md`); Wycheproof; fuzzing; compiled-code
+  constant-time check (amd64, arm64, 386, ppc64le, riscv64); timing test
+  with a control class; independence guard (no external dependency or
+  project name in production code).
+- Performance on the reference VM: Sign 33.6 µs, Verify 59.3 µs, Recover
+  69.1 µs, public key 22.9 µs, 0 allocations; faster than decred in every
+  operation, slower than libsecp256k1 (`docs/SECP256K1-PERFORMANCE.md`).
+- Contract: `docs/SECP256K1-SIGNATURE-CONTRACT.md` (protocol items that
+  the project has not specified are listed there, not invented).
+
 ## V1.1 — review round 2 (2026-11-08)
 
 - Ownership: `NOTICE` now reads "Copyright 2026 Ahmed Ibrahim", replacing

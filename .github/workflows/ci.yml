@@ -65,6 +65,9 @@ jobs:
           go test -count=1 -race ./...
           go test -count=1 -race -tags purego ./...
 
+      - name: secp256k1 compiled-code constant-time check (no conditional branches in constant-time functions)
+        run: SILA_CT_OBJDUMP=1 go test -count=1 -run 'TestCompiled' -v ./secp256k1 | grep -E '^(---|ok|FAIL)|branch'
+
       - name: Generated kernels are up to date
         run: |
           (cd keccak && go generate)
@@ -73,19 +76,38 @@ jobs:
       - name: Short fuzz
         run: go test -run '^$' -fuzz FuzzSum256 -fuzztime 30s ./keccak
 
+      - name: Short fuzz (secp256k1)
+        run: |
+          # Execution counts instead of durations: a time-bounded run can end
+          # with a spurious "context deadline exceeded" when the deadline
+          # races with worker shutdown (Go toolchain behaviour).
+          go test -run '^$' -fuzz '^FuzzPublicKeyRoundTrip$' -fuzztime 500000x ./secp256k1
+          go test -run '^$' -fuzz '^FuzzParseAndVerifySignature$' -fuzztime 300000x ./secp256k1
+          go test -run '^$' -fuzz '^FuzzSignVerifyRecover$' -fuzztime 100000x ./secp256k1
+          go test -run '^$' -fuzz '^FuzzParseCompactYParity$' -fuzztime 1000000x ./txsig
+
   cross-arch:
     name: Other architectures (386 native; s390x big-endian, ppc64le, riscv64 under QEMU)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25.x"
           cache: false
-      - name: Install QEMU user-mode emulators
-        # "qemu-user" exists on Ubuntu 24.04 and 26.04; "qemu-user-static" is a
-        # virtual package without an installation candidate on 26.04.
-        run: sudo apt-get update -q && sudo apt-get install -y -q qemu-user
+      - name: Register QEMU user-mode emulators (binfmt_misc)
+        # Static QEMU emulators registered with the kernel (binfmt_misc), so
+        # s390x, ppc64le and riscv64 test binaries run directly. This does not
+        # depend on the Ubuntu package mirrors, whose name resolution failed
+        # on the runners (apt-get exit code 100, 2026-11-11).
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: s390x,ppc64le,riscv64
+      - name: Check the emulators are registered
+        run: |
+          for arch in s390x ppc64le riscv64; do
+            test -e "/proc/sys/fs/binfmt_misc/qemu-$arch" || { echo "qemu-$arch is not registered"; exit 1; }
+          done
       - name: 386 (native)
         run: GOARCH=386 go test -count=1 -short ./...
       - name: s390x, ppc64le, riscv64 (emulated; correctness only, no timing)
@@ -93,12 +115,64 @@ jobs:
           for arch in s390x ppc64le riscv64; do
             echo "== $arch"
             GOARCH=$arch go vet ./...
-            GOARCH=$arch go test -c -o "$RUNNER_TEMP/keccak.$arch" ./keccak
-            emu=$(command -v "qemu-$arch" || command -v "qemu-$arch-static")
-            (cd keccak && "$emu" "$RUNNER_TEMP/keccak.$arch" -test.short -test.count=1 -test.v | grep -E '^(--- |PASS|FAIL|ok)')
+            for pkg in keccak secp256k1 txsig account; do
+              GOARCH=$arch go test -c -o "$RUNNER_TEMP/$pkg.$arch" "./$pkg"
+              # Run through binfmt_misc; with pipefail a failing test fails the step.
+              (cd "$pkg" && "$RUNNER_TEMP/$pkg.$arch" -test.short -test.count=1 -test.v | grep -E '^(--- |PASS|FAIL|ok)')
+            done
+          done
+      - name: secp256k1 compiled-code constant-time check (386, ppc64le, riscv64 machine code)
+        run: |
+          for arch in 386 ppc64le riscv64; do
+            echo "== $arch"
+            SILA_CT_OBJDUMP=1 SILA_CT_GOARCH=$arch go test -count=1 -run 'TestCompiled' -v ./secp256k1 | grep -E '^(---|ok|FAIL)|branch'
           done
       - name: loong64 (build and vet only; no emulator on the runner image)
-        run: GOARCH=loong64 go vet ./... && GOARCH=loong64 go test -c -o /dev/null ./keccak
+        run: GOARCH=loong64 go vet ./... && GOARCH=loong64 go test -c -o /dev/null ./keccak && GOARCH=loong64 go test -c -o /dev/null ./secp256k1 && GOARCH=loong64 go test -c -o /dev/null ./txsig
+
+  independence:
+    name: SILA independence (dependency graph, offline build, binary metadata, naming)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: false
+      - name: Check independence
+        run: ./scripts/check_independence.sh
+
+  timing:
+    name: secp256k1 timing evidence (informational) / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # Shared runners are noisy: this job records |t| values (dudect-style
+    # Welch test with a random-vs-random control) on real amd64 and arm64
+    # hardware, but cannot fail the workflow.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: false
+      - name: Welch t-test (macOS arm64; Apple Silicon has FEAT_DIT, which Sign and PublicKey enable)
+        if: runner.os == 'macOS'
+        run: |
+          uname -m
+          go version
+          sysctl -n hw.optional.arm.FEAT_DIT 2>/dev/null | sed 's/^/FEAT_DIT=/' || echo "FEAT_DIT unknown"
+          SILA_TIMING_TEST=1 SILA_TIMING_SAMPLES=100000 SILA_TIMING_REPS=5 go test -count=1 -timeout 60m -run ConstantTimeStatistical -v ./secp256k1 | grep -E 'timing_test|^(---|ok|FAIL)'
+      - name: Welch t-test, tiny vs random secrets with random-vs-random controls (100k samples, 5 runs, pinned core)
+        if: runner.os == 'Linux'
+        run: |
+          uname -m
+          go version
+          grep -o -w -m1 dit /proc/cpuinfo && echo "FEAT_DIT available (used by Sign and PublicKey with Go >= 1.24)" || echo "no FEAT_DIT flag"
+          SILA_TIMING_TEST=1 SILA_TIMING_SAMPLES=100000 SILA_TIMING_REPS=5 taskset -c 0 go test -count=1 -timeout 60m -run ConstantTimeStatistical -v ./secp256k1 | grep -E 'timing_test|^(---|ok|FAIL)'
 
   independent-verification:
     name: Independent oracle (907 cases)
@@ -124,7 +198,7 @@ jobs:
         run: python -I scripts/verify_independent.py "$RUNNER_TEMP/sila-keccak256-purego"
 
   geth-equivalence:
-    name: Equivalence with go-ethereum v1.17.10
+    name: Equivalence with go-ethereum v1.17.10 (Keccak; secp256k1 vs libsecp256k1 and decred)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -143,5 +217,9 @@ jobs:
           go test -count=1 -run 'TestSameOutput|TestRandomAgainstGeth|TestDispatchReport' -v . | grep -E 'enabled|^(ok|FAIL|---)'
           go test -count=1 -run 'TestSameOutput|TestRandomAgainstGeth' . -args -sila.noavx512
           go test -count=1 -tags purego -run 'TestSameOutput|TestRandomAgainstGeth' .
+      - name: secp256k1 differential (libsecp256k1 via cgo, decred v4)
+        run: go test -count=1 -run 'Secp256k1' -v . | grep -E '^(ok|FAIL|---)'
+      - name: secp256k1 parity (addresses, raw recovery, value rules, transaction values, hedged nonces)
+        run: go test -count=1 -run 'Parity' -v . | grep -E '^(ok|FAIL|---)|parity_test'
       # Performance is measured on dedicated hardware with run.sh, not on
       # shared CI runners whose timings are not comparable.

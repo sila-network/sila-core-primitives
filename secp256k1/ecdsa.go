@@ -182,6 +182,13 @@ func (sig *Signature) scalars() (r, s scalar, ok bool) {
 // identifier over a 32-byte digest. All operations involving the private
 // key and the nonce are constant time.
 //
+// Fault detection (all signing functions): k·G is computed twice with
+// independent randomisation and checked against r before s is computed.
+// If a computation fault is detected (for example from fault injection
+// or faulty hardware), the function panics instead of returning a
+// signature, because a faulty signature could expose the private key.
+// A correct computation never panics.
+//
 // Interoperability evidence (byte-identical outputs against independent
 // implementations) is recorded in docs/SECP256K1-PARITY.md.
 func Sign(priv *PrivateKey, digest [DigestSize]byte) (Signature, error) {

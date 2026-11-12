@@ -17,8 +17,9 @@ Run on at least these two; more models give stronger evidence.
 | arm64 (optional) | a CPU **without** FEAT_DIT (e.g. Neoverse N1 / Ampere Altra) | shows the countermeasures work without DIT |
 | x86 with DOIT (optional) | Intel with `IA32_UARCH_MISC_CTL` DOIT enabled by the OS (or the AMD equivalent) | the x86 counterpart of DIT |
 
-Software: Go 1.25.x (the project's CI version), the repository at the commit
-being approved, `taskset` (Linux).
+Software: Go 1.25.x (the project's CI version; DIT is enabled only with
+Go ≥ 1.24, and the script warns otherwise), the repository at the commit
+being approved with a clean working tree, `taskset` (Linux).
 
 ## 2. Preparation (Linux)
 
@@ -39,8 +40,11 @@ git checkout <commit to approve>
 sudo ./scripts/timing_dedicated.sh 1000000 10 2   # samples, runs, CPU
 ```
 
-About 1–3 hours per machine. Keep the complete output (it starts with the
-machine facts: CPU, Go version, FEAT_DIT, governor, turbo, isolated CPUs).
+About 1–3 hours per machine. Keep the complete output, for example with
+`| tee timing-<machine>.txt`. It starts with the commit SHA and whether the
+working tree is clean (a modified tree does not identify an approved
+commit), then the machine facts: date, CPU, Go version, FEAT_DIT, governor,
+turbo, isolated CPUs.
 
 The script measures only the production paths: masked inverse, masked k·G,
 Sign and PublicKey. For each, it compares tiny secrets with random ones
@@ -49,7 +53,13 @@ order, and prints one t value per run:
 
 ```
 Sign  [production] t [ … 10 values … ]; control t [ … 10 values … ]
+Sign  verdict: pass | FAIL | NOISY | INCONCLUSIVE | TRIAL
 ```
+
+The verdict applies the table below. The script runs in strict mode
+(`SILA_TIMING_REQUIRE_QUIET=1`): a noisy control makes the command fail,
+and a run below 1,000,000 samples × 10 runs is reported as TRIAL, which
+does not count.
 
 ## 4. Reading the result
 
@@ -62,16 +72,18 @@ Per machine and per path:
 | The control has more than 1 of 10 values beyond ±4.5 | **machine too noisy** — the run does not count; fix the preparation and repeat |
 | The test and the control fail together with the same sign | a measurement problem, not a leak; repeat after preparation |
 
-The test command exits non-zero on a **fail**; a noisy control does not make
-it fail, so check the control values yourself.
+The command exits non-zero on a **fail** and, in the script's strict mode,
+also on a **noisy** machine; check the verdict lines in either case.
 
 S-8 can be closed when every production path passes on every required
-machine (amd64, arm64 with DIT) **and** the independent audit of the
-countermeasures (blinding, key and nonce shares with per-signature fresh
-masks, randomness-failure paths; `secp256k1/blinding.go`, `privatekey.go`,
-`ecdsa.go`), the amd64 assembly (`field_amd64.s`) and the constant-time
-inversion (`inv_ct.go`) found no unresolved
-issue. Record the outputs and the auditor's report in the security review.
+machine (amd64, arm64 with DIT) **and** the owner-selected review (Gate B
+of Issue #4, AI-based by the owner's decision, with its stated limits) of
+the countermeasures (blinding, key and nonce shares with per-signature
+fresh masks, randomness-failure paths, fault checks; `secp256k1/blinding.go`,
+`privatekey.go`, `ecdsa.go`), the assembly (`field_amd64.s`,
+`field_arm64.s`) and the constant-time inversion (`inv_ct.go`) has no
+unresolved issue. Record the outputs in Issue #4 and in the security
+review.
 
 ## 5. What this does not cover
 

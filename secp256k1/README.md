@@ -64,9 +64,12 @@ The comparison tests live in `benchmarks/geth-compare` (a separate module).
 
 ## Performance
 
-Reference VM (amd64): Sign 33.6 µs, Verify 59.3 µs, Recover 69.1 µs,
-public key 22.9 µs, 0 allocations. Faster than decred (pure Go) in every
-operation; slower than libsecp256k1 (C).
+GitHub ubuntu-24.04-arm runner (Neoverse-N2), commit `0f62f69`, against
+libsecp256k1 (C, through go-ethereum's binding): Sign 40.2 µs vs 26.6 µs
+(Sign computes k·G twice as a fault check, which libsecp256k1 does not),
+Verify 32.7 µs vs 33.6 µs, Recover 38.6 µs vs 39.0 µs, public key
+18.4 µs; 0 allocations. Faster than decred (pure Go) in every operation.
+Results depend on the CPU; details and amd64 figures:
 [`docs/SECP256K1-PERFORMANCE.md`](../docs/SECP256K1-PERFORMANCE.md).
 
 ## References

@@ -93,6 +93,17 @@ func minAbs(ts []float64) float64 {
 	return m
 }
 
+// countAbove returns how many values exceed bound in magnitude.
+func countAbove(ts []float64, bound float64) int {
+	n := 0
+	for _, v := range ts {
+		if math.Abs(v) > bound {
+			n++
+		}
+	}
+	return n
+}
+
 func sameSigns(ts []float64) bool {
 	for _, v := range ts {
 		if (v > 0) != (ts[0] > 0) {
@@ -273,8 +284,34 @@ func TestConstantTimeStatistical(t *testing.T) {
 			kind = "diagnostic"
 		}
 		t.Logf("%-22s [%s] t %s; control t %s (bound 4.5, %d runs)", op.name, kind, fmtTs(ts), fmtTs(cs), reps)
-		if !op.diagnostic && minT > 4.5 && sameSign {
+		if op.diagnostic {
+			continue
+		}
+		// Verdict per production path (docs/SECP256K1-DEDICATED-TIMING.md
+		// §4): the control must stay within the bound in all but at most
+		// one run in ten; otherwise the machine is too noisy and the
+		// result does not count.
+		leak := minT > 4.5 && sameSign
+		noisy := countAbove(cs, 4.5) > reps/10
+		verdict := "pass"
+		switch {
+		case leak && noisy:
+			verdict = "INCONCLUSIVE (test and control both beyond the bound; repeat after preparation)"
+		case leak:
+			verdict = "FAIL (secret-dependent timing difference)"
+		case noisy:
+			verdict = "NOISY (control beyond the bound; the result does not count)"
+		case os.Getenv("SILA_TIMING_REQUIRE_QUIET") == "1" && (samples < 1000000 || reps < 10):
+			verdict = "TRIAL (below the required 1,000,000 samples x 10 runs; does not count)"
+		}
+		t.Logf("%-22s verdict: %s", op.name, verdict)
+		if leak {
 			t.Errorf("%s: consistent timing difference between secret classes, min |t| = %.2f (control %s)", op.name, minT, fmtTs(cs))
+		}
+		if noisy && os.Getenv("SILA_TIMING_REQUIRE_QUIET") == "1" {
+			// Dedicated-hardware mode: a noisy machine must not produce a
+			// passing run.
+			t.Errorf("%s: machine too noisy, control t %s; the result does not count", op.name, fmtTs(cs))
 		}
 	}
 	_ = sink

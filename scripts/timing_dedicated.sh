@@ -25,9 +25,22 @@ SAMPLES=${1:-1000000}
 RUNS=${2:-10}
 CPU=${3:-2}
 
+echo "== code"
+echo "commit: $(git rev-parse HEAD)"
+if [ -n "$(git status --porcelain)" ]; then
+  echo "working tree: MODIFIED (the result does not identify an approved commit)"
+else
+  echo "working tree: clean"
+fi
 echo "== machine"
+date -u
 uname -a
 go version
+# DIT is enabled by Sign and PublicKey only with Go >= 1.24.
+gominor=$(go env GOVERSION | sed -E 's/^go1\.([0-9]+).*/\1/')
+if [ "${gominor:-0}" -lt 24 ] 2>/dev/null; then
+  echo "WARNING: Go older than 1.24 does not enable DIT; arm64 DIT results need Go >= 1.24"
+fi
 case "$(uname -s)" in
 Linux)
   grep -m1 'model name' /proc/cpuinfo || grep -m1 -i 'cpu part' /proc/cpuinfo || true
@@ -60,7 +73,9 @@ Darwin)
 esac
 
 echo "== measurement: $SAMPLES samples x $RUNS runs, production paths only"
-SILA_TIMING_TEST=1 SILA_TIMING_PRODUCTION_ONLY=1 \
+# SILA_TIMING_REQUIRE_QUIET=1: a noisy control fails the run instead of
+# passing silently (the result of a noisy machine does not count).
+SILA_TIMING_TEST=1 SILA_TIMING_PRODUCTION_ONLY=1 SILA_TIMING_REQUIRE_QUIET=1 \
 SILA_TIMING_SAMPLES="$SAMPLES" SILA_TIMING_REPS="$RUNS" \
   "${PIN[@]}" go test -count=1 -timeout 24h -run ConstantTimeStatistical -v ./secp256k1 |
   grep -E 'timing_test|^(---|ok|FAIL)'

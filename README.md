@@ -9,6 +9,12 @@ Keccak-256 digest (original 0x01 padding, as used by Ethereum) for
 protocol-compatible hashing. It does **not** implement a blockchain, signature
 scheme, Merkle tree, encoding format or consensus.
 
+The branch `dev/codec-v0.1` adds the third primitive, the SILA canonical
+encoding (package `codec`, development candidate, not released). It covers
+deterministic encoding and strict decoding of nested lists of byte strings
+and unsigned integers. Contract, evidence and security review:
+[`docs/SILA-CODEC-V0.1.md`](docs/SILA-CODEC-V0.1.md).
+
 ## Package and commands
 
 - `keccak.Sum256(data []byte) [32]byte` — one-shot, zero allocations.

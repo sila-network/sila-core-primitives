@@ -1,5 +1,18 @@
 # Changelog
 
+## codec v0.1 — development candidate (2026-11-13, not released)
+
+- New package `codec`: the SILA canonical encoding of nested lists of byte
+  strings, with uint64 and uint256 integers. It has strict canonical
+  decoding, a linear-time Builder, a non-recursive `Validate`, and no
+  allocations on decoding. It uses only the standard library.
+- Tests: exhaustive canonical-bijection tests, fuzz tests and 100 %
+  statement coverage. Differential tests against go-ethereum v1.17.10
+  `rlp` (test-only module) found identical bytes and verdicts.
+- CI: codec fuzzing, s390x, ppc64le and riscv64 emulation through
+  binfmt_misc, and oracle comparison and benchmarks.
+- Keccak-256 v1.1.0 is unchanged.
+
 ## V1.1 — review round 2 (2026-11-08)
 
 - Ownership: `NOTICE` now reads "Copyright 2026 Ahmed Ibrahim", replacing

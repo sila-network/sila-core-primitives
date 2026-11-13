@@ -48,7 +48,10 @@
 // concurrent use; a Builder is not.
 package codec
 
-import "math/bits"
+import (
+	"math/bits"
+	"slices"
+)
 
 const (
 	stringOffset = 0x80 // 0x80..0xb7: string of 0..55 bytes
@@ -90,13 +93,19 @@ func appendHeader(dst []byte, offset byte, size int) []byte {
 }
 
 // AppendString appends the encoding of the byte string s to dst and returns
-// the extended slice.
+// the extended slice. s may overlap dst, including the unused capacity of
+// dst.
 func AppendString(dst, s []byte) []byte {
 	if len(s) == 1 && s[0] < stringOffset {
 		return append(dst, s[0])
 	}
-	dst = appendHeader(dst, stringOffset, len(s))
-	return append(dst, s...)
+	// The bytes of s are moved into place before the header is written: if
+	// s lies in the unused capacity of dst, writing the header first would
+	// overwrite them. copy is safe for overlapping slices.
+	n, h := len(dst), headerSize(len(s))
+	dst = slices.Grow(dst, h+len(s))[:n+h+len(s)]
+	copy(dst[n+h:], s)
+	return appendHeader(dst[:n], stringOffset, len(s))[:n+h+len(s)]
 }
 
 // AppendUint64 appends the encoding of the unsigned integer v to dst.
@@ -113,7 +122,7 @@ func AppendUint64(dst []byte, v uint64) []byte {
 }
 
 // AppendUint256 appends the encoding of the unsigned 256-bit integer whose
-// big-endian representation is v.
+// big-endian representation is v. v may overlap dst.
 func AppendUint256(dst []byte, v *[32]byte) []byte {
 	i := 0
 	for i < len(v) && v[i] == 0 {

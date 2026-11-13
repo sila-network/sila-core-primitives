@@ -665,3 +665,50 @@ func TestNoAllocations(t *testing.T) {
 		t.Errorf("a reused Builder allocates %v times", n)
 	}
 }
+
+// The source may overlap dst, including the unused capacity of dst: the
+// output equals the encoding of the original bytes (review finding: the
+// header was written before the source bytes were copied).
+func TestAppendOverlapping(t *testing.T) {
+	if got := hex.EncodeToString(func() []byte {
+		buf := make([]byte, 3, 16)
+		copy(buf, "cat")
+		return AppendString(buf[:0], buf)
+	}()); got != "83636174" {
+		t.Fatalf("reported case: %s, want 83636174", got)
+	}
+	for _, size := range []int{0, 1, 2, 3, 54, 55, 56, 57, 300} {
+		for _, first := range []byte{0x00, 0x7f, 0x80, 0xff} {
+			backing := make([]byte, 2*size+16)
+			for dstLen := 0; dstLen <= 4; dstLen++ {
+				for off := 0; off+size <= len(backing); off++ {
+					for i := range backing {
+						backing[i] = byte(i*7 + 1)
+					}
+					src := backing[off : off+size]
+					if size > 0 {
+						src[0] = first
+					}
+					want := append(append([]byte(nil), backing[:dstLen]...), AppendString(nil, append([]byte(nil), src...))...)
+					got := AppendString(backing[:dstLen], src)
+					if !bytes.Equal(got, want) {
+						t.Fatalf("size %d first %#x dst len %d src offset %d: %x, want %x", size, first, dstLen, off, got, want)
+					}
+				}
+			}
+		}
+	}
+	// A 256-bit integer stored inside dst's own backing array.
+	for off := 0; off <= 40; off++ {
+		backing := make([]byte, 80)
+		for i := range backing {
+			backing[i] = byte(0x80 + i)
+		}
+		v := (*[32]byte)(backing[off : off+32])
+		want := AppendUint256(append([]byte(nil), backing[:3]...), new([32]byte))
+		want = AppendUint256(want[:3], func() *[32]byte { c := *v; return &c }())
+		if got := AppendUint256(backing[:3], v); !bytes.Equal(got, want) {
+			t.Fatalf("uint256 at offset %d: %x, want %x", off, got, want)
+		}
+	}
+}

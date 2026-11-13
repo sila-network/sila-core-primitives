@@ -124,6 +124,7 @@ built on this format (§7).
 | 33 malformed encodings (each rule C1–C5) | `TestRejects` | expected error each; also rejected by the test model |
 | Canonical bijection: every 1- and 2-byte input, and 3-byte inputs with a boundary last byte | `TestExhaustiveShortInputs` | `Validate` accepts exactly the inputs equal to the re-encoding of their lenient decoding |
 | Random values (3000, nesting 5, sizes around every boundary up to 65541 B) | `TestRandomRoundTrip` | Builder = reference encoder; decode returns the value; `Raw`, `AppendListHeader`, `ListSize` |
+| Overlapping source and destination buffers | `TestAppendOverlapping` | output equals the encoding of the original bytes |
 | Builder misuse | `TestBuilderMisuse` | `ErrOpenList`; panic on unmatched `EndList` and negative size; a failed `Raw` adds nothing |
 | 200 000 nested lists | `TestDeepNesting` | encoded and validated without recursion; corruption found at the bottom |
 | Declared sizes up to 2^64 − 1 | `TestLargeSizes` | `ErrUnexpectedEnd` on 386 and amd64 |
@@ -182,9 +183,15 @@ the primitive:
 | E-5 | Child value crossing its parent list's end | items are split within the parent's content only (C4); exhaustive and oracle tests |
 | E-6 | Quadratic encoding for deep nesting | headers are written once at output; linear time |
 | E-7 | Aliasing: decoded values share the input buffer | documented in the package and in §4 |
+| E-9 | Source bytes overlapping the unused capacity of `dst` were overwritten by the header before being copied, so a different value was encoded (Codex review of `97a0b76`, P2) | fixed: the bytes are moved first with an overlap-safe copy and the header is written after; `TestAppendOverlapping` covers every offset of the source in the backing array, header sizes 1–3 and a 256-bit integer stored inside `dst` |
 | E-8 | Timing: decoding time depends on the input | expected and acceptable: the encoding handles public data (transactions, blocks). Callers must not encode secrets with it in a context where the timing would leak them |
 
-The independent AI review of this branch (Codex) is recorded in the pull
+Codex review record:
+- Code review of `97a0b76`: no major issues.
+- Security review of `97a0b76`: one P2 finding (E-9), fixed with a
+  regression test.
+
+Each later commit is re-reviewed; the results are recorded in the pull
 request. AI review is not a human audit or a certification.
 
 ## 9. Release gates

@@ -41,6 +41,51 @@ are security signals, not a formal proof of cryptographic or assembly
 correctness. Current code must remain labeled **not approved for production**
 until the separate production gates are satisfied.
 
+## Threat model — standalone SILA Keccak-256 library
+
+This threat model covers the already published `v1.1.0` library at
+`3d04feabbfbb15aeef559874c415d6f891fb3c16`. It does **not** describe
+or approve a running SILA blockchain.
+
+- **Assets:** exact Keccak-256 digests, input/state memory safety, bounded
+  interruption latency during hashing, and correct selection of the supported
+  CPU kernel.
+- **Attacker control:** arbitrary input bytes and lengths, stream chunk
+  boundaries, repeated/concurrent requests, and, through the consumer,
+  unusually large inputs. An attacker may try malformed application-level
+  encodings; this byte-hashing library has no parser to reject them.
+- **Trusted boundary:** the pinned module source and build process, the Go
+  runtime/compiler, and the CPU/OS reporting of supported instruction sets.
+  This package performs no authentication, signature verification, private-key
+  management, network communication, or domain separation.
+- **Correctness controls:** official known-answer vectors, the independent
+  907-case oracle, cross-implementation differential tests, both one-shot and
+  streaming APIs, exact block-padding boundaries, and alternate `purego`
+  verification.
+- **Memory and availability controls:** guard-page over-read tests,
+  deterministic regeneration and structural checks of the AVX-512 kernel,
+  CPU-dispatch fallback/GODEBUG tests, race checks, and bounded assembly
+  chunks so a large hash does not block Go scheduler preemption indefinitely.
+  These tests are evidence, not formal proof.
+- **Use restrictions:** `Sum256` may be invoked concurrently, but an
+  individual `Digest` must not be shared concurrently without caller
+  synchronization. Hash-state copies are not guaranteed to be wiped from
+  Go stack memory. A consumer must enforce input-size and resource limits
+  appropriate to its service.
+- **Protocol boundary:** transaction/block encodings, domain-separated
+  messages, commitment formats and agreement among SILA nodes require
+  separate protocol specifications and end-to-end tests. The library does
+  not provide or certify these semantics.
+- **Residual risks:** undiscovered bugs in generated assembly or compiler/CPU
+  combinations not exercised, availability impact from extreme workloads,
+  and vulnerability classes not detected by CI or CodeQL. An independent
+  specialist assessment remains strongly recommended for asset custody.
+
+This records the library-level threat model only. Before production adoption,
+the owner must still review target CPU/OS inventory, security findings,
+confidential vulnerability intake, consumer integration evidence and residual
+risk, and explicitly approve the exact production candidate.
+
 ## SILA production release candidate checklist
 
 The target is **use as the Keccak-256 primitive inside the real SILA network**,

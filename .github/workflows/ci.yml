@@ -42,7 +42,8 @@ jobs:
           uname -m
           grep -m1 'model name' /proc/cpuinfo || true
           grep -o -w -E 'avx512f|avx512vl' /proc/cpuinfo | sort -u || echo "no AVX-512 flags"
-          go test -count=1 -run 'TestAVX512Kernels' -v ./keccak | grep -E 'SKIP|PASS|FAIL|ok' || true
+          # Do not turn a failed kernel diagnostic into a green CI step.
+          go test -count=1 -run 'TestAVX512Kernels' -v ./keccak | grep -E 'SKIP|PASS|FAIL|ok'
 
       - name: gofmt
         run: |
@@ -56,6 +57,49 @@ jobs:
 
       - name: Tests (default kernels)
         run: go test -count=1 -cover ./...
+
+      - name: Consumer API integration (published tag + current SILA source)
+        run: |
+          set -euo pipefail
+          consumer="$(mktemp -d)"
+          trap 'rm -rf "$consumer"' EXIT
+          cd "$consumer"
+          go mod init sila-keccak-consumer
+          # Verify a fresh external consumer can download the actual published tag.
+          go get github.com/sila-network/sila-core-primitives@v1.1.0
+          cat > main.go <<'GO'
+          package main
+
+          import (
+              "encoding/hex"
+              "fmt"
+
+              "github.com/sila-network/sila-core-primitives/keccak"
+          )
+
+          func main() {
+              got := keccak.Sum256(nil)
+              if hex.EncodeToString(got[:]) != "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470" {
+                  panic("Keccak-256 empty-input known-answer mismatch")
+              }
+              h := keccak.New()
+              if _, err := h.Write([]byte("a")); err != nil {
+                  panic(err)
+              }
+              if _, err := h.Write([]byte("bc")); err != nil {
+                  panic(err)
+              }
+              want := keccak.Sum256([]byte("abc"))
+              if hex.EncodeToString(h.Sum(nil)) != hex.EncodeToString(want[:]) {
+                  panic("SILA incremental hashing differs from one-shot")
+              }
+              fmt.Println("SILA Keccak-256 consumer API: PASS")
+          }
+          GO
+          go run .  # publicly published v1.1.0
+          # Then prove the current proposed source has the same consumer API.
+          go mod edit -replace=github.com/sila-network/sila-core-primitives="$GITHUB_WORKSPACE"
+          go run .  # current repository head
 
       - name: Tests (portable kernel, -tags purego)
         run: go test -count=1 -cover -tags purego ./...

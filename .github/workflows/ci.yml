@@ -58,15 +58,15 @@ jobs:
       - name: Tests (default kernels)
         run: go test -count=1 -cover ./...
 
-      - name: Consumer API integration (current SILA source; no chain dependency)
+      - name: Consumer API integration (published tag + current SILA source)
         run: |
           set -euo pipefail
           consumer="$(mktemp -d)"
           trap 'rm -rf "$consumer"' EXIT
           cd "$consumer"
           go mod init sila-keccak-consumer
-          go mod edit -require=github.com/sila-network/sila-core-primitives@v1.1.0
-          go mod edit -replace=github.com/sila-network/sila-core-primitives="$GITHUB_WORKSPACE"
+          # Verify a fresh external consumer can download the actual published tag.
+          go get github.com/sila-network/sila-core-primitives@v1.1.0
           cat > main.go <<'GO'
           package main
 
@@ -96,7 +96,10 @@ jobs:
               fmt.Println("SILA Keccak-256 consumer API: PASS")
           }
           GO
-          go run .
+          go run .  # publicly published v1.1.0
+          # Then prove the current proposed source has the same consumer API.
+          go mod edit -replace=github.com/sila-network/sila-core-primitives="$GITHUB_WORKSPACE"
+          go run .  # current repository head
 
       - name: Tests (portable kernel, -tags purego)
         run: go test -count=1 -cover -tags purego ./...
